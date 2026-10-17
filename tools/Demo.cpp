@@ -155,7 +155,7 @@ public:
     }
 };
 
-class DemoComponent : public juce::Component
+class DemoComponent : public juce::Component, private juce::ComponentListener
 {
 public:
     static constexpr int kBar = 52;
@@ -189,12 +189,16 @@ public:
         devices.addAudioCallback (&audio);
 
         setWantsKeyboardFocus (true);
-        setSize (BuildAppEditor::kWidth, BuildAppEditor::kHeight + kBar);
+        // The editor changes its own height (the build band folds away with
+        // no preset): the window follows it.
+        editor->addComponentListener (this);
+        setSize (editor->getWidth(), editor->getHeight() + kBar);
     }
 
     ~DemoComponent() override
     {
         devices.removeAudioCallback (&audio);
+        editor->removeComponentListener (this);
         editor.reset();
         setLookAndFeel (nullptr);
     }
@@ -216,7 +220,12 @@ public:
         play.setBounds (24, 20, 64, 24);
         bypass.setBounds (96, 20, 74, 24);
         source.setBounds (178, 20, 96, 24);
-        editor->setBounds (0, kBar, BuildAppEditor::kWidth, BuildAppEditor::kHeight);
+        editor->setTopLeftPosition (0, kBar);
+    }
+
+    void componentMovedOrResized (juce::Component& c, bool, bool wasResized) override
+    {
+        if (&c == editor.get() && wasResized) setSize (editor->getWidth(), editor->getHeight() + kBar);
     }
 
     bool keyPressed (const juce::KeyPress& k) override

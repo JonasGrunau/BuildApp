@@ -15,6 +15,8 @@ namespace ba::map
     inline constexpr double kMaxPitch = 12.0;
     // Noise pitch: where the noise band sits.
     inline constexpr double kNoiseMin = 80.0, kNoiseMax = 15000.0;
+    // Noise low cut: the low cut's knob (left = off, 20 Hz .. 8 kHz), resting at 200 Hz.
+    inline constexpr double kNoiseLowCutDefault = 200.0;
     // Level, dB (the parameter is in dB).
     inline constexpr double kLevelMin = -36.0, kLevelMax = 12.0;
 

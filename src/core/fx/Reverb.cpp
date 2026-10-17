@@ -36,11 +36,13 @@ namespace
 double Reverb::decaySeconds (double a) noexcept { return 0.8 + 11.2 * std::pow (std::clamp (a, 0.0, 1.0), 1.7); }
 double Reverb::dryGain (double a) noexcept { return 1.0 - 0.5 * a * a; }
 
-// Send rises fast at first (t^0.6); longer tails hold more energy, so the
-// level is pulled back by decay^-0.4: louder overall, but not exploding.
+// Send rises slowly at first (t^1.4), so the first quarter of the knob is a
+// gentle tail (-40 dB re dry at 5 %, -24 dB at 20 %) and the wash comes in
+// the upper half; longer tails hold more energy, so the level is pulled back
+// by decay^-0.4: louder overall, but not exploding.
 double Reverb::wetGain (double a) noexcept
 {
-    return kWet * std::pow (std::clamp (a, 0.0, 1.0), 0.6) * std::pow (decaySeconds (a) / 1.5, -0.4);
+    return kWet * std::pow (std::clamp (a, 0.0, 1.0), 1.4) * std::pow (decaySeconds (a) / 1.5, -0.4);
 }
 
 void Reverb::Line::allocate (int maxDelay)

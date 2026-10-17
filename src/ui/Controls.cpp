@@ -22,6 +22,46 @@ void NightLookAndFeel::drawCornerResizer (juce::Graphics& g, int w, int h, bool 
         g.drawLine ((float) w * i, (float) h, (float) w, (float) h * i, 1.f);
 }
 
+void NightLookAndFeel::drawPopupMenuBackground (juce::Graphics& g, int w, int h)
+{
+    g.fillAll (col::raised);
+    g.setColour (col::hairline.brighter (0.3f));
+    g.drawRect (0, 0, w, h, 1);
+}
+
+void NightLookAndFeel::drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive,
+                                          bool isHighlighted, bool isTicked, bool, const juce::String& text, const juce::String&,
+                                          const juce::Drawable*, const juce::Colour*)
+{
+    const auto r = area.toFloat();
+    if (isSeparator)
+    {
+        g.setColour (col::hairline);
+        g.fillRect (r.reduced (10.f, 0.f).withHeight (1.f).withY (r.getCentreY()));
+        return;
+    }
+    if (isHighlighted && isActive)
+    {
+        g.setColour (col::hairline);
+        g.fillRect (r.reduced (1.f, 0.f));
+    }
+    if (isTicked)
+    {
+        g.setColour (col::ink);
+        g.fillRect (juce::Rectangle<float> (5.f, 5.f).withCentre ({ r.getX() + 13.f, r.getCentreY() }));
+    }
+    g.setColour (! isActive ? col::inkFaint : isTicked || isHighlighted ? col::ink : col::inkSoft);
+    g.setFont (getPopupMenuFont());
+    g.drawText (text, r.withTrimmedLeft (26.f).withTrimmedRight (10.f), juce::Justification::centredLeft, true);
+}
+
+void NightLookAndFeel::drawPopupMenuSectionHeader (juce::Graphics& g, const juce::Rectangle<int>& area, const juce::String& sectionName)
+{
+    caption (g, sectionName, area.toFloat().withTrimmedLeft (10.f).withTrimmedTop (5.f), juce::Justification::centredLeft, col::inkFaint, 9.f);
+}
+
+juce::Font NightLookAndFeel::getPopupMenuFont() { return mono (11.f); }
+
 // ---- Dial ------------------------------------------------------------------------
 
 Dial::Dial (juce::RangedAudioParameter& p, juce::String n, juce::String h)
@@ -34,10 +74,53 @@ Dial::Dial (juce::RangedAudioParameter& p, juce::String n, juce::String h)
     setOpaque (true);
 }
 
+// Repaint only when it shows: a tick or a different word.
+bool Dial::showsDifferent (std::optional<float> a, std::optional<float> b) const
+{
+    if (a.has_value() != b.has_value()) return true;
+    if (! a) return false;
+    const float na = param.convertTo0to1 (*a), nb = param.convertTo0to1 (*b);
+    return std::abs (na - nb) > 0.002f || param.getText (na, 0) != param.getText (nb, 0);
+}
+
+void Dial::updateCursor()
+{
+    setMouseCursor (untouchable() ? juce::MouseCursor::NormalCursor : juce::MouseCursor::UpDownResizeCursor);
+}
+
+void Dial::setAutoValue (std::optional<float> plain)
+{
+    if (plain == autoValue) return;
+    const bool visible = showsDifferent (plain, autoValue);
+    autoValue = plain;
+    updateCursor();
+    if (visible) repaint();
+}
+
+void Dial::setLocked (std::optional<float> plain)
+{
+    if (plain == lockedValue) return;
+    const bool visible = showsDifferent (plain, lockedValue);
+    const bool locking = plain.has_value() && ! lockedValue.has_value();
+    lockedValue = plain;
+    updateCursor();
+    if (locking)
+    {
+        // Taken over mid-gesture: let go of it.
+        if (dragging)
+        {
+            dragging = false;
+            attachment.endGesture();
+        }
+        entry.reset();
+    }
+    if (visible) repaint();
+}
+
 juce::Rectangle<float> Dial::discArea() const
 {
     const auto b = getLocalBounds().toFloat();
-    const float d = std::min ({ 66.f, b.getWidth() - 8.f, b.getHeight() - 36.f });
+    const float d = std::min ({ maxDisc, b.getWidth() - 8.f, b.getHeight() - 36.f });
     return juce::Rectangle<float> (d, d).withCentre ({ b.getCentreX(), b.getY() + d * 0.5f });
 }
 
@@ -53,9 +136,9 @@ void Dial::paint (juce::Graphics& g)
     const auto area = discArea();
     const auto c = area.getCentre();
     const float R = area.getWidth() * 0.5f;
-    const float norm = param.convertTo0to1 (value);
+    const float norm = param.convertTo0to1 (shown());
     const bool off = valueText() == "Off";
-    const bool hot = isMouseOverOrDragging();
+    const bool hot = isMouseOverOrDragging() && ! untouchable();
     const auto angle = [] (float t) { return juce::MathConstants<float>::pi * (-0.75f + 1.5f * t); };
     const auto at = [&] (float a, float r) { return juce::Point<float> (c.x + r * std::sin (a), c.y - r * std::cos (a)); };
 
@@ -76,8 +159,8 @@ void Dial::paint (juce::Graphics& g)
         p.startNewSubPath (at (a, R * (major ? 0.76f : 0.82f)));
         p.lineTo (at (a, R * 0.96f));
     }
-    const auto litColour = ring == Ring::build ? col::accent : ring == Ring::plain ? col::inkSoft : col::ink;
-    g.setColour (col::hairline.brighter (0.25f));
+    const auto litColour = disabled() ? col::inkFaint : ring == Ring::build ? col::accent : ring == Ring::plain ? col::inkSoft : col::ink;
+    g.setColour (col::hairline.brighter (disabled() ? 0.f : 0.25f));
     g.strokePath (unlit, juce::PathStrokeType (1.2f));
     g.setColour (litColour);
     g.strokePath (lit, juce::PathStrokeType (ring == Ring::position ? 2.f : 1.6f));
@@ -85,12 +168,22 @@ void Dial::paint (juce::Graphics& g)
     // Disc and pointer.
     const float rd = R * 0.62f;
     const auto disc = juce::Rectangle<float> (2.f * rd, 2.f * rd).withCentre (c);
-    g.setColour (col::raised);
+    // Flat (sheet, hairline rim) when the mouse can't turn it; hatched, as
+    // on a drawing, when a preset holds it.
+    g.setColour (untouchable() ? col::sheet : col::raised);
     g.fillEllipse (disc);
-    g.setColour (hot ? col::inkSoft : col::hairline.brighter (0.4f));
+    if (isLocked())
+    {
+        juce::Graphics::ScopedSaveState clip (g);
+        juce::Path round;
+        round.addEllipse (disc);
+        g.reduceClipRegion (round);
+        hatch (g, disc, col::hairline.brighter (0.15f), 3.5f, 1.f);
+    }
+    g.setColour (hot ? col::inkSoft : col::hairline.brighter (untouchable() ? 0.f : 0.4f));
     g.drawEllipse (disc, 1.2f);
     const float a = angle (norm);
-    g.setColour (off ? col::inkSoft : col::ink);
+    g.setColour (disabled() ? col::inkFaint : off ? col::inkSoft : col::ink);
     juce::Path pointer;
     pointer.startNewSubPath (at (a, rd * 0.2f));
     pointer.lineTo (at (a, rd * 0.86f));
@@ -98,13 +191,14 @@ void Dial::paint (juce::Graphics& g)
 
     // Name and value.
     auto txt = getLocalBounds().toFloat().withTop (area.getBottom() + 4.f);
-    caption (g, name, txt.removeFromTop (13.f), juce::Justification::centredTop, hot ? col::ink : col::inkSoft, 9.5f);
+    caption (g, name, txt.removeFromTop (13.f), juce::Justification::centredTop, disabled() ? col::inkFaint : hot ? col::ink : col::inkSoft, 9.5f);
     if (entry == nullptr)
     {
         // A build knob at rest isn't doing anything: its value steps back.
-        g.setColour (off || (rest && ring == Ring::build) ? col::inkFaint : col::ink);
+        g.setColour (disabled() || off || (rest && ring == Ring::build) ? col::inkFaint : col::ink);
         g.setFont (mono (11.f));
-        g.drawText (off ? juce::String ("OFF") : valueText(), txt.removeFromTop (16.f), juce::Justification::centredTop, false);
+        g.drawText (off ? juce::String ("OFF") : autoValue ? "AUTO " + valueText() : valueText(), txt.removeFromTop (16.f),
+                    juce::Justification::centredTop, false);
     }
 }
 
@@ -118,6 +212,7 @@ void Dial::nudge (float delta, bool asGesture)
 
 void Dial::mouseDown (const juce::MouseEvent& e)
 {
+    if (untouchable()) return;
     if (e.mods.isAltDown() || e.mods.isCommandDown())
     {
         attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
@@ -147,6 +242,11 @@ void Dial::mouseUp (const juce::MouseEvent&)
 
 void Dial::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
+    if (untouchable())
+    {
+        Component::mouseWheelMove (e, w);   // the editor behind may scroll
+        return;
+    }
     const float d = (std::abs (w.deltaY) > std::abs (w.deltaX) ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.f : 1.f);
     nudge (d * 0.06f * (e.mods.isShiftDown() ? 0.1f : 1.f), false);
 }
@@ -165,6 +265,7 @@ void Dial::mouseExit (const juce::MouseEvent&)
 
 void Dial::mouseDoubleClick (const juce::MouseEvent&)
 {
+    if (untouchable()) return;
     entry = std::make_unique<juce::TextEditor>();
     entry->setFont (mono (11.f));
     entry->setJustification (juce::Justification::centred);
@@ -188,6 +289,272 @@ void Dial::mouseDoubleClick (const juce::MouseEvent&)
     entry->onEscapeKey = close;
     entry->onFocusLost = close;
     repaint();
+}
+
+// ---- TypeSelector ------------------------------------------------------------------
+
+TypeSelector::TypeSelector (juce::RangedAudioParameter& p, juce::String n, std::vector<Choice> c)
+    : param (p), name (std::move (n)), choices (std::move (c)),
+      attachment (p, [this] (float v) { value = v; repaint(); })
+{
+    for (const auto& ch : choices) widest = std::max (widest, textWidth (mono (10.5f), ch.name));
+    attachment.sendInitialUpdate();
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setOpaque (true);
+}
+
+void TypeSelector::setDriven (std::optional<int> choice)
+{
+    if (choice == driven) return;
+    driven = choice;
+    setMouseCursor (driven ? juce::MouseCursor::NormalCursor : juce::MouseCursor::PointingHandCursor);
+    repaint();
+}
+
+juce::String TypeSelector::getHelp() const
+{
+    const auto& c = choices[(size_t) index()];
+    return c.name + theme::dot + c.help;
+}
+
+void TypeSelector::choose (int i)
+{
+    i = juce::jlimit (0, (int) choices.size() - 1, i);
+    if (i != index()) attachment.setValueAsCompleteGesture ((float) i);
+    if (isMouseOver() && onHover) onHover (this, true);   // the help line follows the choice
+}
+
+float TypeSelector::choiceX() const
+{
+    return textWidth (label (9.f), name.toUpperCase()) + 2.f + 7.f;
+}
+
+float TypeSelector::choiceWidth() const
+{
+    return textWidth (mono (10.5f), choices[(size_t) index()].name);
+}
+
+// The step keys sit 8 px after the current choice's chevron (after its
+// text when a preset holds it and there is no chevron), as tall as a
+// section tag box and centred on the line.
+juce::Rectangle<float> TypeSelector::stepKey (int direction) const
+{
+    const float x = choiceX() + choiceWidth() + (isDriven() ? 0.f : 12.f) + 8.f + (direction > 0 ? 16.f : 0.f);
+    return juce::Rectangle<float> (13.f, 13.f).withCentre ({ x + 6.5f, (float) getHeight() * 0.5f });
+}
+
+int TypeSelector::idealWidth() const
+{
+    return (int) std::ceil (choiceX() + widest + 14.f + (steppers ? 8.f + 16.f + 13.f + 4.f : 0.f));
+}
+
+TypeSelector::Part TypeSelector::partAt (juce::Point<float> p) const
+{
+    if (! getLocalBounds().toFloat().contains (p)) return Part::none;
+    if (steppers)
+    {
+        // Each key takes the full height and half the gap between them.
+        const float split = (stepKey (-1).getRight() + stepKey (1).getX()) * 0.5f;
+        if (p.x > stepKey (1).getRight() + 4.f) return Part::none;   // the room kept for longer choices
+        if (p.x >= split) return Part::next;
+        if (p.x >= stepKey (-1).getX() - 4.f) return Part::prev;
+    }
+    return Part::menu;
+}
+
+void TypeSelector::setHover (Part p)
+{
+    if (p == hover) return;
+    hover = p;
+    if (! isDriven()) setMouseCursor (p == Part::none ? juce::MouseCursor::NormalCursor : juce::MouseCursor::PointingHandCursor);
+    repaint();
+}
+
+void TypeSelector::paint (juce::Graphics& g)
+{
+    g.fillAll (col::sheet);
+    const bool hot = (isMouseOver() || open) && ! isDriven();
+    const bool menuHot = hot && (open || hover == Part::menu);
+    auto r = getLocalBounds().toFloat();
+
+    g.setFont (label (9.f));
+    const float wName = textWidth (g.getCurrentFont(), name.toUpperCase());
+    caption (g, name, r.removeFromLeft (wName + 2.f), juce::Justification::centredLeft, hot ? col::ink : col::inkSoft, 9.f);
+    r.setLeft (choiceX());
+
+    // Step keys: outlined, ink on hover, pressed one pixel down; dimmed while a preset holds the choice.
+    if (steppers)
+    {
+        r.setRight (choiceX() + choiceWidth() + 14.f);   // the choice and its chevron; the keys follow
+        for (const int dir : { -1, 1 })
+        {
+            const auto part = dir < 0 ? Part::prev : Part::next;
+            const bool over = ! isDriven() && hover == part;
+            const auto key = stepKey (dir).reduced (0.5f).translated (0.f, over && pressed == part ? 1.f : 0.f);
+            g.setColour (isDriven() ? col::hairline : over ? col::ink : col::inkSoft);
+            g.drawRoundedRectangle (key, kRadius, 1.f);
+            const float cx = key.getCentreX() - (float) dir * 0.5f, cy = key.getCentreY();
+            juce::Path arrow;
+            arrow.startNewSubPath (cx - 1.5f * (float) dir, cy - 3.f);
+            arrow.lineTo (cx + 1.5f * (float) dir, cy);
+            arrow.lineTo (cx - 1.5f * (float) dir, cy + 3.f);
+            g.setColour (isDriven() ? col::inkFaint : over ? col::ink : col::inkSoft);
+            g.strokePath (arrow, juce::PathStrokeType (1.2f));
+        }
+    }
+
+    // Chevron at the right end of the text; none when a preset holds it.
+    const auto text = choices[(size_t) index()].name;
+    g.setFont (mono (10.5f));
+    const float wText = std::min (textWidth (g.getCurrentFont(), text), r.getWidth() - 14.f);
+    g.setColour (col::ink);
+    g.drawText (text, r.withWidth (wText + 2.f), juce::Justification::centredLeft, true);
+    if (isDriven()) return;
+    const float cx = r.getX() + wText + 9.f, cy = r.getCentreY();
+    juce::Path chevron;
+    chevron.startNewSubPath (cx - 3.f, cy - 1.5f);
+    chevron.lineTo (cx, cy + 1.5f);
+    chevron.lineTo (cx + 3.f, cy - 1.5f);
+    g.setColour (menuHot ? col::ink : col::inkFaint);
+    g.strokePath (chevron, juce::PathStrokeType (1.2f));
+    if (menuHot)
+    {
+        g.setColour (col::inkFaint);
+        g.fillRect (r.getX(), r.getBottom() - 1.f, wText + 12.f, 1.f);
+    }
+}
+
+void TypeSelector::mouseDown (const juce::MouseEvent& e)
+{
+    if (isDriven() || partAt (e.position) == Part::none) return;
+    if (const auto part = partAt (e.position); part == Part::prev || part == Part::next)
+    {
+        pressed = part;
+        const int n = (int) choices.size();
+        choose ((index() + (part == Part::next ? 1 : n - 1)) % n);
+        repaint();
+        return;
+    }
+    juce::PopupMenu menu;
+    juce::String section;
+    for (size_t i = 0; i < choices.size(); ++i)
+    {
+        if (choices[i].section != section)
+        {
+            section = choices[i].section;
+            menu.addSectionHeader (section);
+        }
+        menu.addItem ((int) i + 1, choices[i].name, true, (int) i == index());
+    }
+    open = true;
+    repaint();
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMinimumWidth (getWidth()).withStandardItemHeight (22)
+                                                   .withItemThatMustBeVisible (index() + 1),
+                        [safe = juce::Component::SafePointer<TypeSelector> (this)] (int picked) {
+                            if (safe == nullptr) return;
+                            safe->open = false;
+                            if (picked > 0) safe->choose (picked - 1);
+                            safe->repaint();
+                        });
+}
+
+void TypeSelector::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    if (isDriven())
+    {
+        Component::mouseWheelMove (e, w);
+        return;
+    }
+    wheel += (std::abs (w.deltaY) > std::abs (w.deltaX) ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.f : 1.f);
+    if (std::abs (wheel) < 0.12f) return;
+    choose (index() + (wheel < 0.f ? 1 : -1));
+    wheel = 0.f;
+}
+
+void TypeSelector::mouseUp (const juce::MouseEvent&)
+{
+    if (pressed == Part::none) return;
+    pressed = Part::none;
+    repaint();
+}
+
+void TypeSelector::mouseMove (const juce::MouseEvent& e)
+{
+    setHover (partAt (e.position));
+}
+
+void TypeSelector::mouseDrag (const juce::MouseEvent& e)
+{
+    setHover (partAt (e.position));   // a pressed key lifts when the mouse leaves it
+}
+
+void TypeSelector::mouseEnter (const juce::MouseEvent& e)
+{
+    hover = partAt (e.position);
+    repaint();
+    if (onHover) onHover (this, true);
+}
+
+void TypeSelector::mouseExit (const juce::MouseEvent&)
+{
+    hover = Part::none;
+    repaint();
+    if (onHover) onHover (this, false);
+}
+
+// ---- Switch ------------------------------------------------------------------------
+
+Switch::Switch (juce::RangedAudioParameter& p, juce::String t, juce::String h)
+    : param (p), text (std::move (t)), help (std::move (h)),
+      attachment (p, [this] (float v) { value = v; repaint(); })
+{
+    attachment.sendInitialUpdate();
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setOpaque (true);
+}
+
+void Switch::setDriven (std::optional<bool> on)
+{
+    if (on == driven) return;
+    driven = on;
+    setMouseCursor (driven ? juce::MouseCursor::NormalCursor : juce::MouseCursor::PointingHandCursor);
+    repaint();
+}
+
+void Switch::paint (juce::Graphics& g)
+{
+    g.fillAll (col::sheet);
+    const bool hot = isMouseOver() && ! isDriven();
+    g.setFont (label (9.f));
+    const float w = textWidth (g.getCurrentFont(), text.toUpperCase());
+    const auto b = getLocalBounds().toFloat();
+    const float x = b.getCentreX() - (w + 13.f) * 0.5f;
+    const auto box = juce::Rectangle<float> (7.f, 7.f).withCentre ({ x + 3.5f, b.getCentreY() });
+    g.setColour (isOn() ? col::ink : hot ? col::inkSoft : col::inkFaint);
+    if (isOn()) g.fillRect (box);
+    else g.drawRect (box, 1.f);
+    caption (g, text, { x + 13.f, b.getY(), w + 2.f, b.getHeight() }, juce::Justification::centredLeft,
+             isOn() || hot ? col::ink : col::inkFaint, 9.f);
+}
+
+void Switch::mouseDown (const juce::MouseEvent&)
+{
+    if (isDriven()) return;
+    const bool next = ! isOn();
+    if (beforeToggle) beforeToggle (next);
+    attachment.setValueAsCompleteGesture (next ? 1.f : 0.f);
+}
+
+void Switch::mouseEnter (const juce::MouseEvent&)
+{
+    repaint();
+    if (onHover) onHover (this, true);
+}
+
+void Switch::mouseExit (const juce::MouseEvent&)
+{
+    repaint();
+    if (onHover) onHover (this, false);
 }
 
 // ---- LevelMeter --------------------------------------------------------------------

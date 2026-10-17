@@ -1,22 +1,28 @@
 #pragma once
 
 #include "PluginProcessor.h"
+#include "ui/BuildTimeline.h"
 #include "ui/Controls.h"
 #include "ui/SpectrumView.h"
 
-// One sheet, laid out at 880 x 540 and scaled as a whole when the window is
-// resized (fixed aspect):
+// One sheet, laid out at 880 x 666 and scaled as a whole when the window is
+// resized (fixed aspect); with no preset the build band folds away to its
+// menu and the sheet is 880 x 548:
 //   header   wordmark, input and output meters
-//   A        spectrum with the cuts and the noise band
-//   B..F     filter, pitch, noise, space, output: the nine knobs
-//   footer   what the hovered control does; the engine's rate on the right
+//   A        build: the preset menu, the timeline of what it drives, the BUILD knob
+//   B        spectrum with the cuts and the noise band; the cut types in its header
+//   C..G     filter (cuts, their resonance and auto switches), pitch, noise,
+//            space, output; what the preset drives is locked
+//   footer   what the hovered control does (or what the preset does); the
+//            engine's rate on the right
 //
 // Nothing repaints on the timer unless what it shows changed: the controls
 // are opaque and repaint themselves, the sheet only redraws the footer.
 class BuildAppEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
-    static constexpr int kWidth = 880, kHeight = 540;
+    static constexpr int kWidth = 880, kHeight = 666;   // with a preset
+    static constexpr int kFold = 118;                   // what the build band gives back without one
 
     explicit BuildAppEditor (BuildAppProcessor&);
     ~BuildAppEditor() override;
@@ -41,22 +47,34 @@ private:
         const char* name;
         int cells;
     };
-    static constexpr Group kGroups[] = { { "B", "Filter", 2 }, { "C", "Pitch", 1 }, { "D", "Noise", 2 }, { "E", "Space", 2 }, { "F", "Output", 2 } };
+    static constexpr Group kGroups[] = { { "C", "Filter", 4 }, { "D", "Pitch", 1 }, { "E", "Noise", 3 }, { "F", "Space", 2 }, { "G", "Output", 2 } };
     static float groupX (int group);   // left edge
     static float cellWidth();
 
     void timerCallback() override { tick(); }
     void layout();
+    void setParam (const char* id, float plain);
+    void takeOverResonance (bool lowpass);   // auto off, the knob where auto had it
+    void showDriven();                       // lock what the preset drives, at its values
+    void setOpen (bool presetOn);            // unfold or fold the build band; the window follows
+    int sheetHeight() const { return kHeight - (open ? 0 : kFold); }
+    float fold() const { return open ? 0.f : (float) kFold; }   // how far everything under the band moves up
+    juce::String defaultHelp() const;        // the footer when nothing is hovered
+    juce::String lockedHelp() const;
 
-    static juce::Rectangle<int> footerArea() { return { 24, 512, 832, 22 }; }
+    juce::Rectangle<int> footerArea() const { return { 24, 638 - (int) fold(), 832, 22 }; }
 
     BuildAppProcessor& proc;
     NightLookAndFeel lnf;
     Sheet sheet { *this };
 
     LevelMeter inMeter { "In" }, outMeter { "Out" };
+    BuildTimeline timeline { proc };
     SpectrumView spectrum { proc };
-    Dial lowCut, highCut, pitch, noise, noisePitch, reverb, stereo, level, mix;
+    Dial build, lowCut, lowReso, highCut, highReso, pitch, noise, noisePitch, noiseLowCut, reverb, stereo, level, mix;
+    TypeSelector preset, lowCutType, highCutType;
+    Switch lowAuto, highAuto;
 
     juce::String help, rateText;
+    bool helpIsDefault = true, open = true;
 };

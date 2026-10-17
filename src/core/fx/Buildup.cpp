@@ -14,7 +14,7 @@ void Buildup::prepare (double sampleRate, int maxBlockSize)
     filters.prepare (fs);
     noise.prepare (fs);
     reverb.prepare (fs);
-    for (auto* s : { &width, &mix, &gain })
+    for (auto* s : { &width, &mix, &gain, &makeup })
     {
         s->prepare (fs, 0.02);
         s->snap (s->getTarget());
@@ -34,12 +34,15 @@ void Buildup::reset()
 void Buildup::set (const Settings& s) noexcept
 {
     pitch.setSemitones (s.pitch);
-    filters.setTargets (s.lowCut, s.highCut);
-    noise.setTargets (s.noise, s.noisePitch);
+    pitch.setHighQuality (s.highQuality);
+    filters.setTargets (s.lowCutKnobs(), s.highCutKnobs());
+    filters.setHighQuality (s.highQuality);
+    noise.setTargets (s.noise, s.noisePitch, s.noiseLowCut);
     reverb.setAmount (s.reverb);
     width.setTarget (map::width (s.stereo));
     mix.setTarget (std::clamp ((double) s.mix, 0.0, 1.0));
     gain.setTarget (map::dbToGain (std::clamp ((double) s.levelDb, map::kLevelMin, map::kLevelMax)));
+    makeup.setTarget (map::dbToGain (std::clamp ((double) s.makeupDb, -24.0, 24.0)));
 }
 
 void Buildup::process (float* left, float* right, int n) noexcept
@@ -70,6 +73,14 @@ void Buildup::processChunk (float* left, float* right, int n) noexcept
             const double m = 0.5 * ((double) left[i] + right[i]), s = 0.5 * ((double) left[i] - right[i]) * w;
             left[i] = (float) (m + s);
             right[i] = (float) (m - s);
+        }
+
+    if (! (makeup.settled() && makeup.get() == 1.0))
+        for (int i = 0; i < n; ++i)
+        {
+            const double g = makeup.next();
+            left[i] = (float) (left[i] * g);
+            right[i] = (float) (right[i] * g);
         }
 
     if (! wet)

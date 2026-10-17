@@ -15,8 +15,24 @@ for f in "$@"; do
 done
 
 cd "$(dirname "$0")"
+
+# A build tree configured from another path (the repo was moved or renamed)
+# points its rules there and cannot rebuild: start it over, keeping the local
+# dependency checkouts it used.
+deps=()
+if [[ -f build/CMakeCache.txt ]]; then
+    configured=$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' build/CMakeCache.txt)
+    if [[ ! "$configured" -ef . ]]; then
+        while IFS= read -r line; do
+            if [[ -d "${line#*=}" ]]; then deps+=("-D$line"); fi
+        done < <(grep -E '^FETCHCONTENT_SOURCE_DIR_[A-Z0-9_]+:PATH=.' build/CMakeCache.txt || true)
+        echo "build/ was configured for $configured; configuring it again here." >&2
+        rm -rf build
+    fi
+fi
+
 if [[ ! -f build/build.ninja ]]; then
-    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${BA_CMAKE_ARGS:-}
+    cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release ${deps[@]+"${deps[@]}"} ${BA_CMAKE_ARGS:-}
 fi
 cmake --build build --target buildapp_demo
 

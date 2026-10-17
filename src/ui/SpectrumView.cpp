@@ -58,10 +58,18 @@ float SpectrumView::handleX (Grab g) const
     return map::highCutOff (s.highCut) ? p.getRight() - 5.f : xFor (map::highCutHz (s.highCut));
 }
 
+bool SpectrumView::locked (Grab g) const
+{
+    const auto* preset = proc.activePreset();
+    return preset != nullptr && ba::drives (*preset, g == Grab::low ? ba::Control::lowCut : ba::Control::highCut);
+}
+
 SpectrumView::Grab SpectrumView::grabAt (juce::Point<float> pt) const
 {
     if (! plot().expanded (0.f, 4.f).contains (pt)) return Grab::none;
-    const float dl = std::abs (pt.x - handleX (Grab::low)), dh = std::abs (pt.x - handleX (Grab::high));
+    const float far = 1e6f;
+    const float dl = locked (Grab::low) ? far : std::abs (pt.x - handleX (Grab::low));
+    const float dh = locked (Grab::high) ? far : std::abs (pt.x - handleX (Grab::high));
     if (std::min (dl, dh) > kGrabRange) return Grab::none;
     return dl <= dh ? Grab::low : Grab::high;
 }
@@ -90,7 +98,9 @@ void SpectrumView::refresh()
         changed = spectrum.fall (2.5f) || changed;
 
     const auto s = proc.settings();
-    const std::array<float, 4> knobs { s.lowCut, s.highCut, s.noise, s.noisePitch };
+    const std::array<float, 13> knobs { s.lowCut, s.highCut, s.noise, s.noisePitch, (float) s.lowCutType, (float) s.highCutType,
+                                        s.lowCutReso, s.highCutReso, (float) s.lowCutAuto, (float) s.highCutAuto, s.noiseLowCut,
+                                        (float) locked (Grab::low), (float) locked (Grab::high) };
     if (knobs != shownKnobs)
     {
         shownKnobs = knobs;
@@ -178,7 +188,7 @@ void SpectrumView::draw (juce::Graphics& g)
             for (int i = 0; i <= 160; ++i)
             {
                 const double f = kLow * std::pow (kHigh / kLow, i / 160.0);
-                const double db = map::noiseDb (s.noise) - 24.0 + 20.0 * std::log10 (ba::NoiseSource::shape (f, s.noisePitch, fs) + 1e-9);
+                const double db = map::noiseDb (s.noise) - 24.0 + 20.0 * std::log10 (ba::NoiseSource::shape (f, s.noisePitch, s.noiseLowCut, fs) + 1e-9);
                 const juce::Point<float> pt (xFor (f), ySpectrum (db));
                 if (i == 0) band.startNewSubPath (pt);
                 else band.lineTo (pt);
@@ -198,15 +208,24 @@ void SpectrumView::draw (juce::Graphics& g)
         juce::Path curve, cut;
         cut.startNewSubPath (p.getX(), y0);
         constexpr int kSteps = 220;
+        std::array<juce::Point<float>, kSteps + 1> pts;
         for (int i = 0; i <= kSteps; ++i)
         {
             const double f = kLow * std::pow (kHigh / kLow, (double) i / kSteps);
-            const double db = 20.0 * std::log10 (ba::CutFilters::magnitude (f, s.lowCut, s.highCut, fs) + 1e-12);
+            double db = 20.0 * std::log10 (ba::CutFilters::magnitude (f, s.lowCutKnobs(), s.highCutKnobs(), fs) + 1e-12);
+            if (db > 4.0) db = 4.0 + 6.0 * std::tanh ((db - 4.0) / 6.0);   // tall resonance eases into the headroom
             const juce::Point<float> pt (xFor (f), std::min (yFilter (db), p.getBottom() + 2.f));
+            pts[(size_t) i] = pt;
             if (i == 0) curve.startNewSubPath (pt);
             else curve.lineTo (pt);
             cut.lineTo (pt.x, std::max (pt.y, y0));
         }
+        // The curve's height at x, from the points above.
+        const auto curveY = [&] (float x) {
+            const float t = juce::jlimit (0.f, (float) kSteps, (x - p.getX()) / p.getWidth() * (float) kSteps);
+            const int i = std::min ((int) t, kSteps - 1);
+            return pts[(size_t) i].y + (t - (float) i) * (pts[(size_t) i + 1].y - pts[(size_t) i].y);
+        };
         cut.lineTo (p.getRight(), y0);
         cut.closeSubPath();
         if (lowOn || highOn)
@@ -221,13 +240,17 @@ void SpectrumView::draw (juce::Graphics& g)
         // Markers on the 0 dB line, with their names and frequencies.
         const auto marker = [&] (Grab which, bool on, const juce::String& name, double hz) {
             const float x = handleX (which);
-            const bool hot = hover == which || grab == which;
-            const auto box = juce::Rectangle<float> (hot ? 9.f : 7.f, hot ? 9.f : 7.f).withCentre ({ x, y0 });
-            g.setColour (col::well);
-            g.fillRect (box.expanded (2.f));
-            g.setColour (on ? col::accent : col::inkFaint);
-            if (on) g.fillRect (box);
-            else g.drawRect (box, 1.f);
+            // A cut the preset drives has no handle: it can't be dragged.
+            if (! locked (which))
+            {
+                const bool hot = hover == which || grab == which;
+                const auto box = juce::Rectangle<float> (hot ? 9.f : 7.f, hot ? 9.f : 7.f).withCentre ({ x, y0 });
+                g.setColour (col::well);
+                g.fillRect (box.expanded (2.f));
+                g.setColour (on ? col::accent : col::inkFaint);
+                if (on) g.fillRect (box);
+                else g.drawRect (box, 1.f);
+            }
 
             const juce::String value = on ? fmt::hertz (hz) : juce::String ("OFF");
             g.setFont (label (9.f));
@@ -240,8 +263,17 @@ void SpectrumView::draw (juce::Graphics& g)
             bool left = which == Grab::low;
             if (left && x - 10.f - w < p.getX() + 6.f) left = false;
             if (! left && which == Grab::high && x + 10.f + w > p.getRight() - 6.f) left = true;
-            const float tx = left ? x - 10.f - w : x + 10.f;
+            float tx = left ? x - 10.f - w : x + 10.f;
             const float ty = y0 - 21.f;
+            // A resonant curve can climb through that spot: slide out until the text is clear of it.
+            const auto clear = [&] (float from) {
+                for (float cx = from - 2.f; cx <= from + w + 2.f; cx += 2.f)
+                    if (curveY (cx) < ty + 15.f) return false;
+                return true;
+            };
+            for (int step = 0; step < 80 && ! clear (tx); ++step)
+                tx += left ? -3.f : 3.f;
+            tx = juce::jlimit (p.getX() + 4.f, p.getRight() - 4.f - w, tx);
             caption (g, name, { tx, ty, wName + 1.f, 12.f }, juce::Justification::centredLeft, on ? col::accent : col::inkFaint, 9.f);
             g.setColour (on ? col::ink : col::inkFaint);
             g.setFont (mono (10.f));

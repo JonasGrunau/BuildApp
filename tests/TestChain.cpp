@@ -91,6 +91,7 @@ TEST_CASE ("Chain: noise holds its level across its pitch range, uncorrelated le
         ba::Settings s;
         s.noise = 1.f;
         s.noisePitch = p;
+        s.noiseLowCut = 0.f;   // the band's own level, without the low cut
         const auto y = run (silence, s, fs);
         const size_t from = (size_t) (0.2 * fs);
         const double level = db (rms (y.left, from) / ba::NoiseSource::kFullRms);
@@ -102,6 +103,29 @@ TEST_CASE ("Chain: noise holds its level across its pitch range, uncorrelated le
     off.noisePitch = 1.f;
     const auto y = run (silence, off, fs);
     CHECK (rms (y.left) == 0.0);
+}
+
+TEST_CASE ("Chain: the noise's low cut rests at 200 Hz and takes the lows away", "[chain]")
+{
+    const double fs = 48000.0;
+    const Stereo silence { Signal ((size_t) (3.0 * fs), 0.f), Signal ((size_t) (3.0 * fs), 0.f) };
+    CHECK (std::abs (ba::map::lowCutHz (ba::Settings {}.noiseLowCut) - 200.0) < 0.01);
+    ba::Settings s;
+    s.noise = 1.f;
+    s.noisePitch = 0.1f;   // a band low enough to reach under 200 Hz
+    const auto band = [&] (const Signal& y, double lo, double hi) {
+        double e = 0.0;
+        for (double f = lo; f < hi; f *= 1.05) e += std::pow (toneLevel (y, f, fs, (size_t) (0.5 * fs)), 2.0);
+        return std::sqrt (e);
+    };
+    const auto with = run (silence, s, fs);
+    s.noiseLowCut = 0.f;
+    const auto without = run (silence, s, fs);
+    const double lows = db (band (with.left, 30.0, 80.0) / band (without.left, 30.0, 80.0));
+    const double highs = db (band (with.left, 800.0, 1600.0) / band (without.left, 800.0, 1600.0));
+    INFO ("30-80 Hz: " << lows << " dB, 0.8-1.6 kHz: " << highs << " dB with the low cut at 200 Hz");
+    CHECK (lows < -30.0);
+    CHECK (std::abs (highs) < 1.0);
 }
 
 TEST_CASE ("Chain: reverb tail follows the knob, and the drop cuts it", "[chain]")

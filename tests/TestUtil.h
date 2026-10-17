@@ -5,7 +5,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <numbers>
+#include <utility>
 #include <vector>
 
 namespace testutil
@@ -104,6 +106,105 @@ inline double dominantHz (const Signal& s, double fs, double lo, double hi, size
     for (double f = lo; f <= hi; f *= 1.0005)
         if (const double l = toneLevel (s, f, fs, from); l > bestLevel) { bestLevel = l; best = f; }
     return best;
+}
+
+// Loudness of samples [from, to) in LUFS, BS.1770 K-weighted (shelf + RLB
+// highpass, designed for `fs` the way libebur128 does), both channels,
+// ungated: for comparing renders of the same material, not for metering.
+inline double loudness (const Stereo& s, double fs, size_t from, size_t to)
+{
+    struct Biquad
+    {
+        double b0, b1, b2, a1, a2, z1 = 0.0, z2 = 0.0;
+        double operator() (double x)
+        {
+            const double y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
+        }
+    };
+    const auto design = [fs] {
+        double k = std::tan (pi * 1681.974450955533 / fs), q = 0.7071752369554196;
+        const double vh = std::pow (10.0, 3.999843853973347 / 20.0), vb = std::pow (vh, 0.4996667741545416);
+        double a0 = 1.0 + k / q + k * k;
+        const Biquad shelf { (vh + vb * k / q + k * k) / a0, 2.0 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0,
+                             2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0 };
+        k = std::tan (pi * 38.13547087602444 / fs);
+        q = 0.5003270373238773;
+        a0 = 1.0 + k / q + k * k;
+        const Biquad rlb { 1.0, -2.0, 1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0 };
+        return std::pair { shelf, rlb };
+    };
+    to = std::min (to, s.size());
+    double sum = 0.0;
+    for (const Signal* ch : { &s.left, &s.right })
+    {
+        auto [shelf, rlb] = design();
+        for (size_t i = 0; i < to; ++i)
+        {
+            const double y = rlb (shelf ((*ch)[i]));
+            if (i >= from) sum += y * y;
+        }
+    }
+    return -0.691 + 10.0 * std::log10 (std::max (sum / (double) std::max<size_t> (1, to - from), 1e-30));
+}
+
+// RMS frequency of samples [from, to) of the mid signal, Hz: how bright it
+// is (the square root of the power spectrum's second moment).
+inline double brightness (const Stereo& s, double fs, size_t from, size_t to)
+{
+    to = std::min (to, s.size());
+    double e = 0.0, d = 0.0;
+    for (size_t i = std::max<size_t> (from, 1); i < to; ++i)
+    {
+        const double m = 0.5 * ((double) s.left[i] + s.right[i]), prev = 0.5 * ((double) s.left[i - 1] + s.right[i - 1]);
+        e += m * m;
+        d += (m - prev) * (m - prev);
+    }
+    return fs / (2.0 * pi) * 2.0 * std::asin (std::min (1.0, 0.5 * std::sqrt (d / std::max (e, 1e-30))));
+}
+
+// Side over mid RMS of samples [from, to), dB: how wide it is.
+inline double widthDb (const Stereo& s, size_t from, size_t to)
+{
+    to = std::min (to, s.size());
+    double mm = 0.0, ss = 0.0;
+    for (size_t i = from; i < to; ++i)
+    {
+        const double m = 0.5 * ((double) s.left[i] + s.right[i]), d = 0.5 * ((double) s.left[i] - s.right[i]);
+        mm += m * m;
+        ss += d * d;
+    }
+    return 10.0 * std::log10 (std::max (ss, 1e-30) / std::max (mm, 1e-30));
+}
+
+// Writes `s` as a 32-bit float stereo WAV. Returns false if it couldn't.
+inline bool writeWav (const char* path, const Stereo& s, double fs)
+{
+    std::FILE* f = std::fopen (path, "wb");
+    if (f == nullptr) return false;
+    const auto u32 = [f] (uint32_t v) { std::fwrite (&v, 4, 1, f); };
+    const auto u16 = [f] (uint16_t v) { std::fwrite (&v, 2, 1, f); };
+    const auto bytes = (uint32_t) (s.size() * 2 * sizeof (float));
+    std::fwrite ("RIFF", 1, 4, f);
+    u32 (36 + bytes);
+    std::fwrite ("WAVEfmt ", 1, 8, f);
+    u32 (16);
+    u16 (3);   // IEEE float
+    u16 (2);
+    u32 ((uint32_t) fs);
+    u32 ((uint32_t) fs * 8);
+    u16 (8);
+    u16 (32);
+    std::fwrite ("data", 1, 4, f);
+    u32 (bytes);
+    for (size_t i = 0; i < s.size(); ++i)
+    {
+        const float lr[2] = { s.left[i], s.right[i] };
+        std::fwrite (lr, sizeof (float), 2, f);
+    }
+    return std::fclose (f) == 0;
 }
 
 // A psytrance loop at 145 BPM: kick on the beat, rolling bass on the three

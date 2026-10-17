@@ -1,12 +1,20 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Before project(): on Apple platforms project() creates an empty cache entry
+# for the deployment target, and a set(... CACHE ...) after it never applies,
+# so the plugin only loaded on the macOS it was built on (releases said minos
+# 26.0). FORCE also fills that empty entry in existing build dirs; an explicit
+# -DCMAKE_OSX_DEPLOYMENT_TARGET still wins. Check: otool -l <binary> | grep minos
+if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
+
 # Release builds pass the tag's version, e.g. -DBUILDAPP_VERSION=1.2.0.
-set(BUILDAPP_VERSION "0.1.0" CACHE STRING "Plugin version, MAJOR.MINOR.PATCH")
+set(BUILDAPP_VERSION "0.2.0" CACHE STRING "Plugin version, MAJOR.MINOR.PATCH")
 project(BuildApp VERSION ${BUILDAPP_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "")
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Static MSVC runtime, so the Windows plugin doesn't need the VC++ redistributable.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -24,6 +32,8 @@ include(FetchContent)
 add_library(buildapp_core STATIC
     src/core/dsp/Fft.cpp
     src/core/dsp/Halfband.cpp
+    src/core/fx/FilterStyles.cpp
+    src/core/fx/CharacterFilter.cpp
     src/core/fx/CutFilters.cpp
     src/core/fx/PitchShifter.cpp
     src/core/fx/NoiseSource.cpp
@@ -76,7 +86,8 @@ if(BUILDAPP_BUILD_PLUGIN)
         src/plugin/PluginEditor.cpp
         src/ui/Theme.cpp
         src/ui/Controls.cpp
-        src/ui/SpectrumView.cpp)
+        src/ui/SpectrumView.cpp
+        src/ui/BuildTimeline.cpp)
 
     target_sources(BuildApp PRIVATE ${BUILDAPP_UI_SOURCES})
     target_include_directories(BuildApp PRIVATE src)
@@ -137,9 +148,16 @@ if(BUILDAPP_BUILD_TESTS)
     add_executable(buildapp_tests
         tests/TestFilters.cpp
         tests/TestPitch.cpp
-        tests/TestChain.cpp)
+        tests/TestChain.cpp
+        tests/TestPresets.cpp)
     target_include_directories(buildapp_tests PRIVATE tests)
     target_link_libraries(buildapp_tests PRIVATE buildapp_core Catch2::Catch2WithMain)
+
+    # Dev tool: every preset's buildup rendered to WAV, with per-bar loudness,
+    # brightness and width (how the presets were tuned).
+    add_executable(buildapp_render tools/RenderPresets.cpp)
+    target_include_directories(buildapp_render PRIVATE tests)
+    target_link_libraries(buildapp_render PRIVATE buildapp_core)
 
     include(CTest)
     include(Catch)

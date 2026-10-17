@@ -11,6 +11,7 @@ namespace
     constexpr double kPeakQ = 2.2;    // the resonant top edge that gives the band its pitch
     constexpr double kFloorQ = 0.6;   // the highpass two octaves below the top edge
     constexpr double kFloorRatio = 1.0 / 3.0;
+    constexpr double kCutQ1 = 0.5412, kCutQ2 = 1.3066;   // the low cut: 4-pole Butterworth
 
     double bandMagnitude (double hz, double topHz, double fs) noexcept
     {
@@ -35,10 +36,16 @@ double NoiseSource::compensation (double topHz, double fs) noexcept
     return kFullRms / std::sqrt (std::max (variance, 1e-12));
 }
 
-double NoiseSource::shape (double hz, float pitch, double fs) noexcept
+double NoiseSource::shape (double hz, float pitch, float lowCut, double fs) noexcept
 {
     const double top = map::noiseHz (pitch);
-    return bandMagnitude (hz, top, fs) / bandMagnitude (top, top, fs);
+    double m = bandMagnitude (hz, top, fs) / bandMagnitude (top, top, fs);
+    if (! map::lowCutOff (lowCut))
+    {
+        const double cut = map::lowCutHz (lowCut);
+        m *= dsp::svfMagnitude (true, cut, kCutQ1, hz, fs) * dsp::svfMagnitude (true, cut, kCutQ2, hz, fs);
+    }
+    return m;
 }
 
 void NoiseSource::prepare (double sampleRate)
@@ -46,9 +53,13 @@ void NoiseSource::prepare (double sampleRate)
     fs = sampleRate;
     gain.prepare (fs, 0.02);
     centreLog.prepare (fs, 0.03);
+    cutLog.prepare (fs, 0.02);
+    cutFade.prepare (fs, 0.02);
     gain.snap (gain.getTarget());
     centreLog.snap (centreLog.getTarget());
-    shownLog = -1.0;
+    cutLog.snap (cutLog.getTarget());
+    cutFade.settle();
+    shownLog = cutShown = -1.0;
     reset();
 }
 
@@ -56,14 +67,27 @@ void NoiseSource::reset()
 {
     for (auto& s : lowpass) s.reset();
     for (auto& s : highpass) s.reset();
+    for (auto& ch : cutState)
+        for (auto& s : ch) s.reset();
 }
 
-void NoiseSource::setTargets (float volume, float pitch) noexcept
+void NoiseSource::setTargets (float volume, float pitch, float lowCut) noexcept
 {
     gain.setTarget (map::noiseGain (volume));
-    const double to = std::log2 (map::noiseHz (pitch));
-    if (isSilent()) centreLog.snap (to);   // wakes up where the knob is
-    else centreLog.setTarget (to);
+    const double to = std::log2 (map::noiseHz (pitch)), cutTo = std::log2 (map::lowCutHz (lowCut));
+    if (isSilent())   // wakes up where the knobs are
+    {
+        centreLog.snap (to);
+        cutLog.snap (cutTo);
+        cutFade.snap (! map::lowCutOff (lowCut));
+    }
+    else
+    {
+        centreLog.setTarget (to);
+        if (cutFade.isOff()) cutLog.snap (cutTo);
+        else cutLog.setTarget (cutTo);
+        cutFade.setOn (! map::lowCutOff (lowCut));
+    }
 }
 
 void NoiseSource::process (float* left, float* right, int n) noexcept
@@ -87,6 +111,19 @@ void NoiseSource::process (float* left, float* right, int n) noexcept
             }
             shownLog = lg;
         }
+        const bool cutting = ! cutFade.isOff();
+        const double cf = cutting ? cutFade.next() : 0.0;
+        if (cutting)
+        {
+            const double cl = cutLog.next();
+            if (cl != cutShown)
+            {
+                const double hz = std::exp2 (cl);
+                cut1.set (hz, kCutQ1, fs);
+                cut2.set (hz, kCutQ2, fs);
+                cutShown = cl;
+            }
+        }
         for (int c = 0; c < 2; ++c)
         {
             auto& s = seed[(size_t) c];   // xorshift32
@@ -94,9 +131,17 @@ void NoiseSource::process (float* left, float* right, int n) noexcept
             s ^= s >> 17;
             s ^= s << 5;
             const double white = (double) (int32_t) s * (1.0 / 2147483648.0);
-            const double y = highpass[(size_t) c].highpass (hpCoeffs, lowpass[(size_t) c].lowpass (lpCoeffs, white));
+            double y = highpass[(size_t) c].highpass (hpCoeffs, lowpass[(size_t) c].lowpass (lpCoeffs, white));
+            if (cutting)
+            {
+                auto& st = cutState[(size_t) c];
+                y += cf * (st[1].highpass (cut2, st[0].highpass (cut1, y)) - y);
+            }
             out[c][i] += (float) (g * norm * y);
         }
+        if (cutting && cutFade.isOff())   // faded out: it starts from rest when it comes back
+            for (auto& ch : cutState)
+                for (auto& s : ch) s.reset();
     }
     if (isSilent()) reset();
 }

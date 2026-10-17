@@ -5,111 +5,170 @@
 namespace ba
 {
 
+// ---- One cut ---------------------------------------------------------------------
+
+void CutFilters::Cut::prepare (double rate)
+{
+    setRate (rate);
+    log2Hz.snap (log2Hz.getTarget());
+    peak.snap (resonanceAt (log2Hz.get()));
+    fade.settle();
+    reset();
+}
+
+void CutFilters::Cut::setRate (double rate) noexcept
+{
+    now.setSampleRate (rate);
+    before.setSampleRate (rate);
+    log2Hz.prepare (rate, 0.02);
+    peak.prepare (rate, 0.03);
+    fade.prepare (rate, 0.02);
+    change.prepare (rate, 0.03);
+}
+
+void CutFilters::Cut::reset() noexcept
+{
+    now.reset();
+    before.reset();
+    change.snap (true);
+    cold = true;
+}
+
+double CutFilters::Cut::resonanceAt (double hz) noexcept
+{
+    if (! autoReso) return manual;
+    if (hz != autoAt)
+    {
+        autoValue = ba::autoReso (lowpass, character (lowpass, type), std::exp2 (hz));
+        autoAt = hz;
+    }
+    return autoValue;
+}
+
+void CutFilters::Cut::setTarget (bool on, double hz, const CutKnobs& k) noexcept
+{
+    const int t = std::clamp (k.type, 0, (int) characters (lowpass).size() - 1);
+    manual = std::clamp ((double) k.reso, 0.0, 1.0);
+    autoReso = k.autoReso;
+    // A silent filter jumps to the knobs and the type, so it wakes up where they are.
+    if (fade.isOff())
+    {
+        log2Hz.snap (hz);
+        if (t != type) now.setCharacter (character (lowpass, t));
+        type = t;
+        autoAt = -1.0;
+        peak.snap (resonanceAt (hz));
+        change.snap (true);
+    }
+    else
+    {
+        log2Hz.setTarget (hz);
+        if (t != type)
+        {
+            before = now;
+            now.setCharacter (character (lowpass, t));
+            type = t;
+            autoAt = -1.0;
+            change.snap (false);
+            change.setOn (true);
+        }
+    }
+    fade.setOn (on);
+}
+
+void CutFilters::Cut::process (double* v) noexcept
+{
+    if (fade.isOff()) return;
+    const double w = fade.next();
+    if (fade.isOff())
+    {
+        // Faded out: it starts from rest when it comes back.
+        reset();
+        return;
+    }
+
+    const double hz = log2Hz.next();
+    peak.setTarget (resonanceAt (hz));
+    const double pk = peak.next();
+    now.setCutoff (hz, pk);
+    if (cold)
+    {
+        now.prime (v);
+        cold = false;
+    }
+    double y[2] = { v[0], v[1] };
+    now.process (y);
+    if (! change.isOn())
+    {
+        const double k = change.next();
+        before.setCutoff (hz, pk);
+        double z[2] = { v[0], v[1] };
+        before.process (z);
+        for (int c = 0; c < 2; ++c)
+            y[c] = z[c] + k * (y[c] - z[c]);
+    }
+    for (int c = 0; c < 2; ++c)
+        v[c] += w * (y[c] - v[c]);
+}
+
+// ---- Both, and the path -------------------------------------------------------------
+
 void CutFilters::prepare (double sampleRate)
 {
     fs = sampleRate;
-    factor = oversamplingFor (fs);
-    rate = fs * factor;
+    factor = wantHigh ? oversamplingFor (fs) : 1;
     for (auto* stage : { &up2, &down2 })
         for (auto& h : *stage) h.setup (6, 0.137);
-
-    lowLog.prepare (rate, 0.02);
-    highLog.prepare (rate, 0.02);
-    lowLog.snap (lowLog.getTarget());
-    highLog.snap (highLog.getTarget());
-    lowFade.prepare (rate, 0.02);
-    highFade.prepare (rate, 0.02);
+    low.prepare (fs * factor);
+    high.prepare (fs * factor);
     pathFade.prepare (fs, 0.02);
-    lowFade.settle();
-    highFade.settle();
     pathFade.settle();
-    lowShown = highShown = -1.0;
-    reset();
+    history = {};
+    resetPath();
 }
 
 void CutFilters::reset()
 {
-    for (auto* stage : { &up1, &up2, &down2, &down1 })
-        for (auto& h : *stage) h.reset();
-    for (auto& ch : lowState)
-        for (auto& s : ch) s.reset();
-    for (auto& ch : highState)
-        for (auto& s : ch) s.reset();
-    highCold = true;
+    low.reset();
+    high.reset();
+    resetPath();
 }
 
-void CutFilters::setTargets (float lowCut, float highCut) noexcept
+void CutFilters::resetPath() noexcept
 {
-    const bool lowOn = ! map::lowCutOff (lowCut), highOn = ! map::highCutOff (highCut);
-    // A silent filter jumps to the knob, so it wakes up where the knob is.
-    const double lowTo = std::log2 (map::lowCutHz (lowCut)), highTo = std::log2 (map::highCutHz (highCut));
-    if (lowFade.isOff()) lowLog.snap (lowTo);
-    else lowLog.setTarget (lowTo);
-    if (highFade.isOff()) highLog.snap (highTo);
-    else highLog.setTarget (highTo);
-    lowFade.setOn (lowOn);
-    highFade.setOn (highOn);
+    for (auto* stage : { &up1, &up2, &down2, &down1 })
+        for (auto& h : *stage) h.reset();
+}
+
+void CutFilters::setFactor (int f) noexcept
+{
+    factor = f;
+    low.setRate (fs * f);
+    high.setRate (fs * f);
+}
+
+void CutFilters::setTargets (const CutKnobs& l, const CutKnobs& h) noexcept
+{
+    const bool lowOn = ! map::lowCutOff (l.position), highOn = ! map::highCutOff (h.position);
+    low.setTarget (lowOn, std::log2 (map::lowCutHz (l.position)), l);
+    high.setTarget (highOn, std::log2 (map::highCutHz (h.position)), h);
     pathFade.setOn (lowOn || highOn);
 }
 
-// Both stages share the cutoff; the same coefficients serve the high- and the lowpass.
-void CutFilters::coefficients (double cutoffHz, double sr, dsp::SvfCoeffs& c1, dsp::SvfCoeffs& c2) noexcept
-{
-    const double g = dsp::SvfCoeffs::prewarp (cutoffHz, sr);
-    c1.set (g, kQ1);
-    c2.set (g, kQ2);
-}
-
-void CutFilters::step (double* v) noexcept
-{
-    const double lowNow = lowLog.next(), highNow = highLog.next();
-    if (lowNow != lowShown)
-    {
-        coefficients (std::exp2 (lowNow), rate, low1, low2);
-        lowShown = lowNow;
-    }
-    if (highNow != highShown)
-    {
-        coefficients (std::exp2 (highNow), rate, high1, high2);
-        highShown = highNow;
-    }
-
-    const double l = lowFade.next(), h = highFade.next();
-    if (h > 0.0 && highCold)
-    {
-        // A lowpass waking from rest would start at zero under a running
-        // signal: start it settled on the signal instead.
-        for (int c = 0; c < 2; ++c)
-            for (auto& s : highState[(size_t) c])
-                s = { 0.0, v[c] };
-        highCold = false;
-    }
-    for (int c = 0; c < 2; ++c)
-    {
-        double x = v[c];
-        if (l > 0.0)
-        {
-            const double y = lowState[(size_t) c][1].highpass (low2, lowState[(size_t) c][0].highpass (low1, x));
-            x += l * (y - x);
-        }
-        if (h > 0.0)
-        {
-            const double y = highState[(size_t) c][1].lowpass (high2, highState[(size_t) c][0].lowpass (high1, x));
-            x += h * (y - x);
-        }
-        v[c] = x;
-    }
-}
-
-// One sample through the oversampled path; with `filter` false only the
-// halfbands run (to settle them).
+// One host sample through the path; with `filter` false only the halfbands
+// run (to settle them).
 void CutFilters::run (const double* in, double* out, bool filter) noexcept
 {
+    const auto cuts = [&] (double* v) {
+        if (! filter) return;
+        low.process (v);
+        high.process (v);
+    };
     if (factor == 1)
     {
         out[0] = in[0];
         out[1] = in[1];
-        if (filter) step (out);
+        cuts (out);
         return;
     }
     double a[2], b[2];
@@ -117,11 +176,8 @@ void CutFilters::run (const double* in, double* out, bool filter) noexcept
         up1[(size_t) c].up (in[c], a[c], b[c]);
     if (factor == 2)
     {
-        if (filter)
-        {
-            step (a);
-            step (b);
-        }
+        cuts (a);
+        cuts (b);
     }
     else
     {
@@ -131,13 +187,10 @@ void CutFilters::run (const double* in, double* out, bool filter) noexcept
             up2[(size_t) c].up (a[c], a0[c], a1[c]);
             up2[(size_t) c].up (b[c], b0[c], b1[c]);
         }
-        if (filter)
-        {
-            step (a0);
-            step (a1);
-            step (b0);
-            step (b1);
-        }
+        cuts (a0);
+        cuts (a1);
+        cuts (b0);
+        cuts (b1);
         for (int c = 0; c < 2; ++c)
         {
             a[c] = down2[(size_t) c].down (a0[c], a1[c]);
@@ -148,8 +201,27 @@ void CutFilters::run (const double* in, double* out, bool filter) noexcept
         out[c] = down1[(size_t) c].down (a[c], b[c]);
 }
 
+void CutFilters::settlePath() noexcept
+{
+    resetPath();
+    if (factor == 1) return;
+    for (int k = 0; k < kHistory; ++k)
+    {
+        const int at = (historyPos + k) & (kHistory - 1);
+        const double in[2] = { history[0][(size_t) at], history[1][(size_t) at] };
+        double out[2];
+        run (in, out, false);
+    }
+}
+
 void CutFilters::process (float* left, float* right, int n) noexcept
 {
+    if (const int want = wantHigh ? oversamplingFor (fs) : 1; want != factor)
+    {
+        setFactor (want);
+        if (! isBypassed()) settlePath();
+    }
+
     if (isBypassed())
     {
         if (! pathFade.isTargetOn())
@@ -163,61 +235,41 @@ void CutFilters::process (float* left, float* right, int n) noexcept
             }
             return;
         }
-        // Waking up: run the halfbands over the recent past, so the path
-        // fades in from its steady state rather than from a cold transient.
-        reset();
-        for (int k = 0; k < kHistory; ++k)
-        {
-            const int at = (historyPos + k) & (kHistory - 1);
-            const double in[2] = { history[0][(size_t) at], history[1][(size_t) at] };
-            double out[2];
-            run (in, out, false);
-        }
+        // Waking up: the path fades in from its steady state, not from a cold transient.
+        settlePath();
     }
 
     for (int i = 0; i < n; ++i)
     {
+        history[0][(size_t) historyPos] = left[i];
+        history[1][(size_t) historyPos] = right[i];
+        historyPos = (historyPos + 1) & (kHistory - 1);
+
         const double in[2] = { left[i], right[i] };
         double out[2];
         run (in, out, true);
-        // The oversampled path delays by a few samples, so it fades in and
-        // out against the untouched signal rather than switching.
         const double p = pathFade.next();
         left[i] = (float) (in[0] + p * (out[0] - in[0]));
         right[i] = (float) (in[1] + p * (out[1] - in[1]));
     }
 
-    // A filter that has faded out starts from rest when it comes back.
-    if (lowFade.isOff())
-        for (auto& ch : lowState)
-            for (auto& s : ch) s.reset();
-    if (highFade.isOff())
-    {
-        for (auto& ch : highState)
-            for (auto& s : ch) s.reset();
-        highCold = true;
-    }
     if (isBypassed())
-    {
-        reset();
-        history = {};
-    }
+        resetPath();
 }
 
-double CutFilters::magnitude (double hz, float lowCut, float highCut, double sr) noexcept
+double CutFilters::resonance (bool lowpass, const CutKnobs& k) noexcept
 {
-    const double r = sr * oversamplingFor (sr);
+    if (! k.autoReso) return std::clamp ((double) k.reso, 0.0, 1.0);
+    return autoReso (lowpass, character (lowpass, k.type), lowpass ? map::highCutHz (k.position) : map::lowCutHz (k.position));
+}
+
+double CutFilters::magnitude (double hz, const CutKnobs& l, const CutKnobs& h, double fs) noexcept
+{
     double m = 1.0;
-    if (! map::lowCutOff (lowCut))
-    {
-        const double fc = map::lowCutHz (lowCut);
-        m *= dsp::svfMagnitude (true, fc, kQ1, hz, r) * dsp::svfMagnitude (true, fc, kQ2, hz, r);
-    }
-    if (! map::highCutOff (highCut))
-    {
-        const double fc = map::highCutHz (highCut);
-        m *= dsp::svfMagnitude (false, fc, kQ1, hz, r) * dsp::svfMagnitude (false, fc, kQ2, hz, r);
-    }
+    if (! map::lowCutOff (l.position))
+        m *= CharacterFilter::magnitude (false, character (false, l.type), map::lowCutHz (l.position), resonance (false, l), hz, fs);
+    if (! map::highCutOff (h.position))
+        m *= CharacterFilter::magnitude (true, character (true, h.type), map::highCutHz (h.position), resonance (true, h), hz, fs);
     return m;
 }
 

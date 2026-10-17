@@ -2,6 +2,8 @@
 
 #include "fx/CutFilters.h"
 
+#include <vector>
+
 using namespace theme;
 
 namespace
@@ -11,7 +13,32 @@ namespace
         "At rest \xe2\x80\x94 low cut left, high cut right, everything else at zero \xe2\x80\x94 the signal passes untouched, bit for bit."));
 
     constexpr float kLeft = 24.f, kRight = 856.f, kGroupGap = 20.f;
-    constexpr float kRuleY = 348.f, kTagY = 360.f, kDialY = 382.f, kDialH = 112.f;
+    // Each section: a rule, its tag (13 high) kGap clear of it, its content
+    // kGap clear of the tag, and kGap from the content to the next rule.
+    constexpr float kGap = 12.f, kTagH = 13.f, kRuleH = 1.f;
+    constexpr float kBuildTagY = 87.f, kBuildY = kBuildTagY + kTagH + kGap, kBuildH = 106.f;            // A (under the 1.5 px masthead rule at 74)
+    constexpr float kBuildRuleY = kBuildY + kBuildH + kGap;                                              // 230
+    constexpr float kSpecTagY = kBuildRuleY + kRuleH + kGap, kSpecY = kSpecTagY + kTagH + kGap, kSpecH = 194.f;   // B
+    constexpr float kRuleY = kSpecY + kSpecH + kGap, kTagY = kRuleY + kRuleH + kGap;                    // C..G
+    constexpr float kDialY = kTagY + kTagH + kGap, kDialH = 108.f;
+    constexpr float kFootRuleY = 634.f;
+    static_assert (kBuildRuleY - (kBuildTagY + kTagH + kGap) == (float) BuildAppEditor::kFold, "folded, the rule sits kGap under the tag");
+
+    std::vector<TypeSelector::Choice> typeChoices (bool lowpass)
+    {
+        std::vector<TypeSelector::Choice> out;
+        for (const auto& c : ba::characters (lowpass))
+            out.push_back ({ c.name, c.help, c.build ? "Buildup" : "Breakdown" });
+        return out;
+    }
+
+    std::vector<TypeSelector::Choice> presetChoices()
+    {
+        std::vector<TypeSelector::Choice> out { { "Off", "No preset: every knob is yours, and BUILD does nothing.", {} } };
+        for (const auto& p : ba::kPresets)
+            out.push_back ({ p.name, p.help, p.section });
+        return out;
+    }
 } // namespace
 
 float BuildAppEditor::cellWidth()
@@ -30,37 +57,68 @@ float BuildAppEditor::groupX (int group)
 
 BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
     : AudioProcessorEditor (p), proc (p),
-      lowCut (p.param (ids::lowCut), "Low cut", "24 dB/oct highpass with a +3 dB corner, 20 Hz to 8 kHz. All the way left: off."),
-      highCut (p.param (ids::highCut), "High cut", "24 dB/oct lowpass with a +3 dB corner, 20 kHz down to 100 Hz. All the way right: off."),
+      build (p.param (ids::build), "Build",
+             "The buildup in one knob: it drives everything the preset took over, from rest (0 %) to the top of the build. Back to 0 is the drop."),
+      lowCut (p.param (ids::lowCut), "Low cut", "Highpass, 20 Hz to 8 kHz, in the low cut type picked above the spectrum. All the way left: off."),
+      lowReso (p.param (ids::lowCutReso), "Reso", "Low cut resonance. AUTO: it moves with the cutoff the way the low cut type wants; switch AUTO off to set it yourself."),
+      highCut (p.param (ids::highCut), "High cut", "Lowpass, 20 kHz down to 100 Hz, in the high cut type picked above the spectrum. All the way right: off."),
+      highReso (p.param (ids::highCutReso), "Reso", "High cut resonance. AUTO: it moves with the cutoff the way the high cut type wants; switch AUTO off to set it yourself."),
       pitch (p.param (ids::pitch), "Pitch", "Shifts up to +12 semitones, continuously; splices land in phase with the material."),
       noise (p.param (ids::noise), "Volume", "White noise on top of the signal, after the cuts, wide stereo. All the way left: off."),
       noisePitch (p.param (ids::noisePitch), "Pitch", "Where the noise band sits, 80 Hz to 15 kHz; its resonant top edge gives it a pitch."),
+      noiseLowCut (p.param (ids::noiseLowCut), "Low cut", "Highpass on the noise only, 24 dB/oct, 20 Hz to 8 kHz; 200 Hz keeps it off the kick and the bass. All the way left: off."),
       reverb (p.param (ids::reverb), "Reverb", "More send, a longer tail (0.8 to 12 s), less dry, until the loop washes out. Back to zero cuts the tail."),
       stereo (p.param (ids::stereo), "Stereo", "100 % is the full image; turning it up narrows it towards mono."),
       level (p.param (ids::level), "Level", juce::String (juce::CharPointer_UTF8 ("Output gain, \xe2\x88\x92" "36 to +12 dB."))),
-      mix (p.param (ids::mix), "Dry/Wet", "The untouched input against the whole effect.")
+      mix (p.param (ids::mix), "Dry/Wet", "The untouched input against the whole effect."),
+      preset (p.param (ids::preset), "Preset", presetChoices()),
+      lowCutType (p.param (ids::lowCutType), "Low cut", typeChoices (false)),
+      highCutType (p.param (ids::highCutType), "High cut", typeChoices (true)),
+      lowAuto (p.param (ids::lowCutAuto), "Auto", "Auto resonance for the low cut: on, it rises as the cut climbs, shaped by its type; off, the Reso knob sets it."),
+      highAuto (p.param (ids::highCutAuto), "Auto", "Auto resonance for the high cut: on, it follows the sweep, shaped by its type; off, the Reso knob sets it.")
 {
     setLookAndFeel (&lnf);
     addAndMakeVisible (sheet);
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &inMeter, &outMeter, &spectrum, &lowCut, &highCut, &pitch, &noise,
-                                                                       &noisePitch, &reverb, &stereo, &level, &mix })
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &inMeter, &outMeter, &timeline, &build, &preset, &spectrum,
+                                                                       &lowCut, &lowReso, &highCut, &highReso,
+                                                                       &pitch, &noise, &noisePitch, &noiseLowCut, &reverb, &stereo, &level, &mix,
+                                                                       &lowCutType, &highCutType, &lowAuto, &highAuto })
         sheet.addAndMakeVisible (c);
 
     highCut.setRing (Dial::Ring::build, true);
     noisePitch.setRing (Dial::Ring::position);
     level.setRing (Dial::Ring::bipolar);
     mix.setRing (Dial::Ring::plain);
-    for (auto* d : { &lowCut, &highCut, &pitch, &noise, &noisePitch, &reverb, &stereo, &level, &mix })
-        d->onHover = [this, d] (Dial*, bool on) { showHelp (on ? d->getHelp() : juce::String()); };
+    build.setMaxDisc (84.f);
+    build.onHover = [this] (Dial* d, bool on) { showHelp (on ? d->getHelp() : juce::String()); };
+    for (auto* d : { &lowCut, &lowReso, &highCut, &highReso, &pitch, &noise, &noisePitch, &noiseLowCut, &reverb, &stereo, &level, &mix })
+        d->onHover = [this, d] (Dial*, bool on) { showHelp (! on ? juce::String() : d->isLocked() ? lockedHelp() : d->getHelp()); };
+    for (auto* a : { &lowAuto, &highAuto })
+        a->onHover = [this] (Switch* sw, bool on) { showHelp (! on ? juce::String() : sw->isDriven() ? lockedHelp() : sw->getHelp()); };
+    // Taking the resonance over from auto starts where auto had it: no jump.
+    lowAuto.beforeToggle = [this] (bool on) { if (! on) takeOverResonance (false); };
+    highAuto.beforeToggle = [this] (bool on) { if (! on) takeOverResonance (true); };
+    for (auto* t : { &lowCutType, &highCutType })
+    {
+        t->setSteppers (true);
+        t->onHover = [this] (TypeSelector* sel, bool on) { showHelp (! on ? juce::String() : sel->isDriven() ? lockedHelp() : sel->getHelp()); };
+    }
+    preset.setSteppers (true);
+    preset.onHover = [this] (TypeSelector* sel, bool on) { showHelp (on ? sel->getHelp() : juce::String()); };
+    timeline.onHover = [this] (bool on) {
+        showHelp (on ? juce::String (juce::CharPointer_UTF8 ("Where the preset takes each control as BUILD rises, the built part lit \xc2\xb7 drag to scrub BUILD, double-click to drop it to 0."))
+                     : juce::String());
+    };
     spectrum.onHover = [this] (bool on) {
         showHelp (on ? juce::String (juce::CharPointer_UTF8 ("Drag a marker to move that cut \xc2\xb7 drag it past the edge or double-click it to switch it off.")) : juce::String());
     };
-    help = kDefaultHelp;
+    help = defaultHelp();
 
     setResizable (true, true);
-    setResizeLimits (kWidth * 3 / 4, kHeight * 3 / 4, kWidth * 2, kHeight * 2);
-    getConstrainer()->setFixedAspectRatio ((double) kWidth / kHeight);
-    setSize (kWidth, kHeight);
+    setResizeLimits (kWidth * 3 / 4, (kHeight - kFold) * 3 / 4, kWidth * 2, kHeight * 2);
+    open = proc.activePreset() != nullptr;
+    getConstrainer()->setFixedAspectRatio ((double) kWidth / sheetHeight());
+    setSize (kWidth, sheetHeight());
     layout();
     tick();
     startTimerHz (30);
@@ -74,30 +132,122 @@ BuildAppEditor::~BuildAppEditor()
 
 void BuildAppEditor::resized()
 {
-    sheet.setBounds (0, 0, kWidth, kHeight);
+    sheet.setBounds (0, 0, kWidth, sheetHeight());
     sheet.setTransform (juce::AffineTransform::scale ((float) getWidth() / kWidth));
+}
+
+void BuildAppEditor::setOpen (bool presetOn)
+{
+    if (presetOn == open) return;
+    open = presetOn;
+    const float scale = (float) getWidth() / kWidth;
+    getConstrainer()->setFixedAspectRatio ((double) kWidth / sheetHeight());
+    layout();
+    setSize (getWidth(), juce::roundToInt ((float) sheetHeight() * scale));
+    sheet.repaint();
 }
 
 void BuildAppEditor::layout()
 {
     inMeter.setBounds (560, 24, 136, 26);
     outMeter.setBounds (720, 24, 136, 26);
-    spectrum.setBounds (24, 106, 832, 230);
+    preset.setBounds (150, (int) kBuildTagY - 2, preset.idealWidth(), 17);
+    timeline.setBounds (24, (int) kBuildY, 680, (int) kBuildH);
+    build.setBounds (728, (int) kBuildY + 1, 128, (int) kBuildH + 6);   // its value on the timeline's axis line
+    timeline.setVisible (open);
+    build.setVisible (open);
 
-    Dial* dials[] = { &lowCut, &highCut, &pitch, &noise, &noisePitch, &reverb, &stereo, &level, &mix };
+    // Everything under the build band moves up when it folds.
+    const float dy = fold();
+    spectrum.setBounds (24, (int) (kSpecY - dy), 832, (int) kSpecH);
+    lowCutType.setBounds (150, (int) (kSpecTagY - dy) - 2, lowCutType.idealWidth(), 17);
+    highCutType.setBounds (384, (int) (kSpecTagY - dy) - 2, highCutType.idealWidth(), 17);
+
+    Dial* dials[] = { &lowCut, &lowReso, &highCut, &highReso, &pitch, &noise, &noisePitch, &noiseLowCut, &reverb, &stereo, &level, &mix };
     int d = 0;
     const float cw = cellWidth();
     for (int gi = 0; gi < (int) std::size (kGroups); ++gi)
         for (int c = 0; c < kGroups[gi].cells; ++c)
-            dials[d++]->setBounds (juce::Rectangle<float> (groupX (gi) + (float) c * cw, kDialY, cw, kDialH).toNearestInt());
+            dials[d++]->setBounds (juce::Rectangle<float> (groupX (gi) + (float) c * cw, kDialY - dy, cw, kDialH).toNearestInt());
+    // The auto switches under their resonance knobs.
+    lowAuto.setBounds (lowReso.getBounds().withY ((int) (kDialY - dy + kDialH) - 16).withHeight (16));
+    highAuto.setBounds (highReso.getBounds().withY ((int) (kDialY - dy + kDialH) - 16).withHeight (16));
+}
+
+void BuildAppEditor::setParam (const char* id, float plain)
+{
+    auto& prm = proc.param (id);
+    prm.beginChangeGesture();
+    prm.setValueNotifyingHost (prm.convertTo0to1 (plain));
+    prm.endChangeGesture();
+}
+
+// Every control shows what the chain runs with: auto resonance where auto
+// has it, and what the preset drives locked at the preset's value.
+void BuildAppEditor::showDriven()
+{
+    const auto s = proc.settings();
+    const auto* p = proc.activePreset();
+    const auto drives = [p] (ba::Control c) { return p != nullptr && ba::drives (*p, c); };
+    const auto lock = [&] (Dial& d, ba::Control c, float plain) { d.setLocked (drives (c) ? std::optional<float> (plain) : std::nullopt); };
+    using C = ba::Control;
+
+    for (const bool lowpass : { false, true })
+    {
+        const auto k = lowpass ? s.highCutKnobs() : s.lowCutKnobs();
+        const auto c = lowpass ? C::highCut : C::lowCut;
+        auto& reso = lowpass ? highReso : lowReso;
+        const auto autoValue = k.autoReso ? std::optional<float> ((float) (100.0 * ba::CutFilters::resonance (lowpass, k))) : std::nullopt;
+        reso.setAutoValue (autoValue);
+        lock (reso, c, autoValue.value_or (100.f * k.reso));
+        lock (lowpass ? highCut : lowCut, c, k.position);
+        (lowpass ? highCutType : lowCutType).setDriven (drives (c) ? std::optional<int> (k.type) : std::nullopt);
+        (lowpass ? highAuto : lowAuto).setDriven (drives (c) ? std::optional<bool> (k.autoReso) : std::nullopt);
+    }
+    lock (pitch, C::pitch, s.pitch);
+    lock (noise, C::noise, s.noise);
+    lock (noisePitch, C::noisePitch, s.noisePitch);
+    lock (noiseLowCut, C::noiseLowCut, s.noiseLowCut);
+    lock (reverb, C::reverb, s.reverb);
+    lock (stereo, C::stereo, s.stereo);
+    setOpen (p != nullptr);
+
+    if (helpIsDefault && help != defaultHelp())
+    {
+        help = defaultHelp();
+        sheet.repaint (footerArea());
+    }
+}
+
+void BuildAppEditor::takeOverResonance (bool lowpass)
+{
+    const auto s = proc.settings();
+    if (! (lowpass ? s.highCutAuto : s.lowCutAuto)) return;
+    const double reso = ba::CutFilters::resonance (lowpass, lowpass ? s.highCutKnobs() : s.lowCutKnobs());
+    setParam (lowpass ? ids::highCutReso : ids::lowCutReso, (float) (100.0 * reso));
+    setParam (lowpass ? ids::highCutAuto : ids::lowCutAuto, 0.f);
+    (lowpass ? highReso : lowReso).setAutoValue (std::nullopt);
 }
 
 void BuildAppEditor::showHelp (const juce::String& line)
 {
-    const auto next = line.isEmpty() ? kDefaultHelp : line;
+    helpIsDefault = line.isEmpty();
+    const auto next = helpIsDefault ? defaultHelp() : line;
     if (next == help) return;
     help = next;
     sheet.repaint (footerArea());
+}
+
+juce::String BuildAppEditor::defaultHelp() const
+{
+    if (const auto* p = proc.activePreset()) return juce::String (p->name) + theme::dot + p->help;
+    return kDefaultHelp;
+}
+
+juce::String BuildAppEditor::lockedHelp() const
+{
+    const auto* p = proc.activePreset();
+    return "Driven by BUILD in " + juce::String (p != nullptr ? p->name : "the preset") + kDash + "pick Off in the preset menu to take it back.";
 }
 
 void BuildAppEditor::Sheet::paint (juce::Graphics& g)
@@ -125,17 +275,24 @@ void BuildAppEditor::Sheet::paint (juce::Graphics& g)
     g.setColour (col::inkFaint);
     g.fillRect (kLeft, 74.f, kRight - kLeft, 1.5f);
 
-    // Section A and its legend.
-    sectionTag (g, "A", "Spectrum", { kLeft, 86.f });
+    // Section A: build (folded to its tag and menu without a preset; all
+    // below moves up by dy).
+    const float dy = ed.fold();
+    sectionTag (g, "A", "Build", { kLeft, kBuildTagY });
+    g.setColour (col::hairline);
+    g.fillRect (kLeft, kBuildRuleY - dy, kRight - kLeft, 1.f);
+
+    // Section B and its legend.
+    sectionTag (g, "B", "Spectrum", { kLeft, kSpecTagY - dy });
     {
         float lx = kRight;
         const auto item = [&] (const juce::String& name, const std::function<void (juce::Rectangle<float>)>& swatch) {
             g.setFont (label (9.f));
             const float w = textWidth (g.getCurrentFont(), name.toUpperCase());
             lx -= w;
-            caption (g, name, { lx, 86.f, w + 2.f, 13.f }, juce::Justification::centredLeft, col::inkSoft, 9.f);
+            caption (g, name, { lx, kSpecTagY - dy, w + 2.f, 13.f }, juce::Justification::centredLeft, col::inkSoft, 9.f);
             lx -= 22.f;
-            swatch ({ lx, 92.f, 16.f, 1.f });
+            swatch ({ lx, kSpecTagY - dy + 6.f, 16.f, 1.f });
             lx -= 18.f;
         };
         item ("Cuts", [&] (auto r) { g.setColour (col::accent); g.fillRect (r.withHeight (2.f).translated (0.f, -0.5f)); });
@@ -151,20 +308,20 @@ void BuildAppEditor::Sheet::paint (juce::Graphics& g)
 
     // Knob groups.
     g.setColour (col::hairline);
-    g.fillRect (kLeft, kRuleY, kRight - kLeft, 1.f);
+    g.fillRect (kLeft, kRuleY - dy, kRight - kLeft, 1.f);
     for (int gi = 0; gi < (int) std::size (kGroups); ++gi)
     {
-        sectionTag (g, kGroups[gi].letter, kGroups[gi].name, { groupX (gi), kTagY });
+        sectionTag (g, kGroups[gi].letter, kGroups[gi].name, { groupX (gi), kTagY - dy });
         if (gi > 0)
         {
             g.setColour (col::hairline);
-            g.fillRect (groupX (gi) - kGroupGap * 0.5f, kTagY, 1.f, kDialY + kDialH - kTagY - 4.f);
+            g.fillRect (groupX (gi) - kGroupGap * 0.5f, kTagY - dy, 1.f, kDialY + kDialH - kTagY - 4.f);
         }
     }
 
     // Footer.
     g.setColour (col::hairline);
-    g.fillRect (kLeft, 508.f, kRight - kLeft, 1.f);
+    g.fillRect (kLeft, kFootRuleY - dy, kRight - kLeft, 1.f);
     const auto foot = ed.footerArea().toFloat();
     g.setFont (mono (10.5f));
     g.setColour (col::ink);
@@ -179,10 +336,16 @@ void BuildAppEditor::tick()
     inMeter.push (proc.takePeak (false));
     outMeter.push (proc.takePeak (true));
     spectrum.refresh();
+    timeline.refresh();
+    showDriven();
 
     const double fs = proc.getRate();
+    // Live the cuts run at the host rate; offline renders oversample them.
+    const int hq = ba::CutFilters::oversamplingFor (fs);
     const auto r = fmt::fixed (fs / 1000.0, std::abs (fs - std::round (fs / 1000.0) * 1000.0) > 1.0 ? 1 : 0) + " kHz" + theme::dot
-                 + "CUTS " + juce::String (ba::CutFilters::oversamplingFor (fs)) + juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + " OVERSAMPLED";
+                 + (hq == 1 ? juce::String ("CUTS AT FULL RATE")
+                            : "CUTS " + juce::String (hq) + juce::String (juce::CharPointer_UTF8 ("\xc3\x97"))
+                                  + (proc.isNonRealtime() ? " (RENDERING)" : " ON EXPORT"));
     if (r != rateText)
     {
         rateText = r;

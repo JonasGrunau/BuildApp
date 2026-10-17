@@ -12,7 +12,8 @@ class BuildAppProcessor;
 // own scale (0 dB near the top) and what it removes hatched, and the noise
 // band dotted where it sits. The two cut markers can be dragged sideways;
 // dragging one past the edge of the plot, or double-clicking it, turns that
-// filter off. Paints offscreen (software renderer, one blit).
+// filter off; a cut the preset drives has no marker to drag. Paints
+// offscreen (software renderer, one blit).
 class SpectrumView : public juce::Component
 {
 public:
@@ -43,6 +44,7 @@ private:
     float yFilter (double db) const;     // filter scale
     float handleX (Grab g) const;
     Grab grabAt (juce::Point<float> p) const;
+    bool locked (Grab g) const;   // the preset drives that cut
     juce::RangedAudioParameter& paramFor (Grab g) const;
     void setFromX (Grab g, float x);
 
@@ -51,6 +53,6 @@ private:
     juce::Image buffer;
     int64_t lastCount = -1;
     int quietTicks = 0;
-    std::array<float, 4> shownKnobs { -1.f, -1.f, -1.f, -1.f };
+    std::array<float, 13> shownKnobs {};   // what the last paint showed (refresh compares)
     Grab grab = Grab::none, hover = Grab::none;
 };

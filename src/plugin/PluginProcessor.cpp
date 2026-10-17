@@ -2,6 +2,7 @@
 
 #include "Format.h"
 #include "PluginEditor.h"
+#include "fx/Characters.h"
 #include "fx/Mapping.h"
 #include "fx/Reverb.h"
 
@@ -14,9 +15,26 @@ namespace
     bool saysOff (const juce::String& t) { return t.trim().equalsIgnoreCase ("off"); }
 
     // The order of rawParams.
-    enum Raw { lowCut, highCut, pitch, noise, noisePitch, reverb, stereo, level, mix };
+    enum Raw { lowCut, highCut, pitch, noise, noisePitch, reverb, stereo, level, mix, lowCutType, highCutType,
+               lowCutReso, highCutReso, lowCutAuto, highCutAuto, noiseLowCut, preset, build };
     constexpr const char* kRawIds[] = { ids::lowCut, ids::highCut, ids::pitch, ids::noise, ids::noisePitch,
-                                        ids::reverb, ids::stereo, ids::level, ids::mix };
+                                        ids::reverb, ids::stereo, ids::level, ids::mix, ids::lowCutType, ids::highCutType,
+                                        ids::lowCutReso, ids::highCutReso, ids::lowCutAuto, ids::highCutAuto, ids::noiseLowCut,
+                                        ids::preset, ids::build };
+
+    juce::StringArray typeNames (bool lowpass)
+    {
+        juce::StringArray names;
+        for (const auto& c : ba::characters (lowpass)) names.add (c.name);
+        return names;
+    }
+
+    juce::StringArray presetNames()
+    {
+        juce::StringArray names (kOff);
+        for (const auto& p : ba::kPresets) names.add (p.name);
+        return names;
+    }
 } // namespace
 
 BuildAppProcessor::BuildAppProcessor()
@@ -46,6 +64,17 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
         Attr().withStringFromValueFunction ([] (float v, int) { return map::highCutOff (v) ? kOff : fmt::hertz (map::highCutHz (v)); })
               .withValueFromStringFunction ([] (const String& t) { return saysOff (t) ? 1.f : map::highCutNorm (fmt::parse (t)); })));
 
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::lowCutType, 2 }, "Low Cut Type", typeNames (false), 0));
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::highCutType, 2 }, "High Cut Type", typeNames (true), 0));
+    for (const auto& [id, name] : { std::pair { ids::lowCutReso, "Low Cut Resonance" }, { ids::highCutReso, "High Cut Resonance" } })
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { id, 2 }, name, unit (0.f, 100.f), 30.f,
+            Attr().withLabel ("%")
+                  .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
+                  .withValueFromStringFunction ([] (const String& t) { return (float) juce::jlimit (0.0, 100.0, fmt::parse (t)); })));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::lowCutAuto, 2 }, "Low Cut Auto Resonance", true));
+    layout.add (std::make_unique<AudioParameterBool> (ParameterID { ids::highCutAuto, 2 }, "High Cut Auto Resonance", true));
+
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ids::pitch, 1 }, "Pitch", unit (0.f, (float) map::kMaxPitch), 0.f,
         Attr().withLabel ("st")
@@ -61,6 +90,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
         ParameterID { ids::noisePitch, 1 }, "Noise Pitch", unit (0.f, 1.f), 0.5f,
         Attr().withStringFromValueFunction ([] (float v, int) { return fmt::hertz (map::noiseHz (v)); })
               .withValueFromStringFunction ([] (const String& t) { return map::noiseHzNorm (fmt::parse (t)); })));
+
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ids::noiseLowCut, 2 }, "Noise Low Cut", unit (0.f, 1.f), map::lowCutNorm (map::kNoiseLowCutDefault),
+        Attr().withStringFromValueFunction ([] (float v, int) { return map::lowCutOff (v) ? kOff : fmt::hertz (map::lowCutHz (v)); })
+              .withValueFromStringFunction ([] (const String& t) { return saysOff (t) ? 0.f : map::lowCutNorm (fmt::parse (t)); })));
 
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ids::reverb, 1 }, "Reverb", unit (0.f, 1.f), 0.f,
@@ -89,6 +123,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
               .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
               .withValueFromStringFunction ([] (const String& t) { return (float) fmt::parse (t); })));
 
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::preset, 3 }, "Preset", presetNames(), 0));
+    layout.add (std::make_unique<AudioParameterFloat> (
+        ParameterID { ids::build, 3 }, "Build", unit (0.f, 100.f), 0.f,
+        Attr().withLabel ("%")
+              .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
+              .withValueFromStringFunction ([] (const String& t) { return (float) juce::jlimit (0.0, 100.0, fmt::parse (t)); })));
+
     return layout;
 }
 
@@ -97,15 +138,32 @@ ba::Settings BuildAppProcessor::settings() const noexcept
     ba::Settings s;
     s.lowCut = raw (Raw::lowCut);
     s.highCut = raw (Raw::highCut);
+    s.lowCutType = juce::roundToInt (raw (Raw::lowCutType));
+    s.highCutType = juce::roundToInt (raw (Raw::highCutType));
+    s.lowCutReso = raw (Raw::lowCutReso) / 100.f;
+    s.highCutReso = raw (Raw::highCutReso) / 100.f;
+    s.lowCutAuto = raw (Raw::lowCutAuto) >= 0.5f;
+    s.highCutAuto = raw (Raw::highCutAuto) >= 0.5f;
     s.pitch = raw (Raw::pitch);
     s.noise = raw (Raw::noise);
     s.noisePitch = raw (Raw::noisePitch);
+    s.noiseLowCut = raw (Raw::noiseLowCut);
     s.reverb = raw (Raw::reverb);
     s.stereo = raw (Raw::stereo);
     s.levelDb = raw (Raw::level);
     s.mix = raw (Raw::mix) / 100.f;
+    s.highQuality = isNonRealtime();
+    if (const auto* p = activePreset()) s = ba::applyPreset (*p, buildAmount(), s);
     return s;
 }
+
+const ba::Preset* BuildAppProcessor::activePreset() const noexcept
+{
+    const int i = juce::roundToInt (raw (Raw::preset));
+    return i >= 1 && i <= (int) std::size (ba::kPresets) ? &ba::kPresets[(size_t) i - 1] : nullptr;
+}
+
+float BuildAppProcessor::buildAmount() const noexcept { return juce::jlimit (0.f, 1.f, raw (Raw::build) / 100.f); }
 
 // ---- Audio --------------------------------------------------------------------
 

@@ -2,14 +2,15 @@
 
 A buildup effect for psytrance. Put it on the loop or the group you want to
 build, ride the knobs over the last bars, and pull them back for the drop.
-Nine knobs, one chain:
+Twelve knobs and two filter-type menus, one chain. Or pick one of ten presets
+and ride a single knob, **BUILD**, that moves the rest for you:
 
-![BuildApp halfway into a buildup](docs/screenshot.png)
+![BuildApp in the Full-On Rise preset, 70 % into the build](docs/screenshot.png)
 
 ```
-in ─┬─ pitch ─ low cut ─ high cut ─ + noise ─ reverb ─ stereo ─┐ wet
-    └──────────────────────────────────────────────────────────┤ dry
-                                                 dry/wet ─ level ─ out
+in ─┬─ pitch ─ low cut ─ high cut ─ + noise ─ reverb ─ stereo ─ makeup ─┐ wet
+    └───────────────────────────────────────────────────────────────────┤ dry
+                                                          dry/wet ─ level ─ out
 ```
 
 VST3 and Audio Unit for macOS (universal), VST3 for Windows. JUCE 8.
@@ -18,12 +19,15 @@ VST3 and Audio Unit for macOS (universal), VST3 for Windows. JUCE 8.
 
 | Knob | What it does |
 |------|--------------|
-| **Low cut** | 24 dB/oct highpass, 20 Hz to 8 kHz. All the way left: off. |
-| **High cut** | 24 dB/oct lowpass, 20 kHz down to 100 Hz. All the way right: off. |
+| **Low cut** | Highpass, 20 Hz to 8 kHz, in the low cut type. All the way left: off. |
+| **High cut** | Lowpass, 20 kHz down to 100 Hz, in the high cut type. All the way right: off. |
+| **Low / high cut type** | The menus above the spectrum: eleven buildup and breakdown sounds for the low cut and ten for the high cut, each a filter style, slope and drive taken from FabFilter Volcano 3's factory presets (e.g. *Classic 24 / Rise*, *Gentle 12 / Soft*, *Gentle 12 / Default*). |
+| **Reso** (one per cut) | The cut's resonance. With **Auto** on (the default) it moves with the cutoff the way the type wants: a low cut sings more the higher it climbs, a high cut is most resonant around 1.4 kHz and backs off when closed. While Auto is on the knob is greyed out and only shows where Auto has it; switch Auto off to set it yourself, starting where Auto had it. |
 | **Pitch** | Up to +12 semitones, continuous, so it can be ridden through a build. |
 | **Noise volume** | White noise on top of the signal (after the cuts), wide stereo. Left: off. |
 | **Noise pitch** | Where the noise band sits, 80 Hz to 15 kHz. Its resonant top edge gives it a pitch; the level stays put while it sweeps. |
-| **Reverb** | One knob for the classic buildup wash: more send, a longer tail (0.8 s to 12 s), less dry, until the loop dissolves. Back to zero cuts the tail within ~30 ms: the dry drop. |
+| **Noise low cut** | 24 dB/oct highpass on the noise only, 20 Hz to 8 kHz, resting at 200 Hz so the noise stays off the kick and bass. All the way left: off. |
+| **Reverb** | One knob for the classic buildup wash: more send, a longer tail (0.8 s to 12 s), less dry, until the loop dissolves. It comes in gradually (−40 dB under the dry at 5 %, −12 dB at half). Back to zero cuts the tail within ~30 ms: the dry drop. |
 | **Stereo** | 100 % is the image as it is; turning it up narrows it towards mono. |
 | **Level** | Output gain, −36 to +12 dB. |
 | **Dry/Wet** | The untouched input against the whole effect. |
@@ -35,51 +39,108 @@ each stage at rest is skipped, not run at unity.
 Every knob drags up/down (Shift for fine), takes the mouse wheel, types a value
 on double-click (`340`, `4.2k`, `-6`, `off`) and resets on Alt/Cmd-click. The
 cut markers in the spectrum can be dragged sideways too; drag one past the edge
-of the plot, or double-click it, to switch that filter off. Hover over anything
-and the footer says what it does.
+of the plot, or double-click it, to switch that filter off. The preset and the
+two cut-type menus have `<` `>` keys on their right to step through the list
+(wrapping at the ends), and take the mouse wheel too. Hover over anything and
+the footer says what it does.
 
 ### The display
 
-- **A — Spectrum**: the input (faint line) and the output (filled), with the
+- **A — Build**: the preset menu, a timeline of what the preset does (one lane
+  per control it drives, lit in green from where it starts moving up to
+  BUILD, with the value there on the right) and the BUILD knob. Click or drag
+  the timeline to scrub BUILD; double-click it to drop to 0. With the preset
+  Off the band folds away to its menu and the window gets shorter.
+- **B — Spectrum**: the input (faint line) and the output (filled), with the
   cuts' response in green on its own scale (0 dB near the top) and what they
   take away hatched. The noise band shows dotted where it sits.
-- **B–F**: the knobs. The ring around a knob says what kind it is: green from
+- **C–G**: the knobs. A knob the preset drives is hatched and follows BUILD;
+  it can't be turned until the preset is switched off. The ring around a knob says what kind it is: green from
   the rest position to the value on the knobs that build tension (dark when
   the knob is at rest; the high cut rests on the right, so it lights to the
   left), one tick for noise pitch (a place, not an amount), bone around 0 dB
   for level, grey for dry/wet.
 
+## Presets: the build on one knob
+
+Pick a preset and every control it uses is locked to a path along BUILD's
+travel: BUILD at 0 % leaves the signal untouched (bit for bit), 100 % is the
+top of the build, and pulling it back to 0 is the drop. Automate BUILD over
+the 8 or 16 bars before the drop. **Level** and **Dry/Wet** always stay
+yours, and so does every knob the preset leaves out. Your own knob settings
+wait underneath: switch the preset to Off and they're back.
+
+The paths follow what producers do by hand: entries are staggered (the low end
+thins first, noise comes in mid-build, pitch rises late, the reverb opens in
+the last third, the image narrows on the last bar), most of the motion is in
+the last quarter, and brightness rises with the tension. Each preset holds its
+loudness within a few LU of the dry signal (a makeup gain lane fills in where
+the cuts take the low end away), so the drop is what hits.
+
+| Preset | Style | What moves (on a 16-bar build) | Left to you |
+|--------|-------|-------------------------------|-------------|
+| **Full-On Rise** | the classic | low cut *Classic 24 / Rise* climbs to 920 Hz; noise from bar 2, sweeping up to 9 kHz; reverb from bar 9; the image narrows on the last two bars | high cut, pitch, noise low cut |
+| **Rocket** | hi-tech | pitch from bar 5 to +12 st, slow then fast; low cut *Hard 48 / Flay* to 400 Hz; bright noise; a little narrowing at the end | high cut, reverb, noise low cut |
+| **Stairs** | Goa | pitch up a semitone every bar from bar 5 (an octave by bar 16); low cut *Classic 12 / Thin* to 300 Hz; a short tail on the last bars | high cut, noise, stereo |
+| **Acid Scream** | Goa / acid | low cut *Classic 48 / Scream* to 650 Hz with its resonance rising to 80 %; noise from bar 5; tail from bar 10 | high cut, pitch, stereo, noise low cut |
+| **Tunnel** | progressive | high cut *Smooth 24 / Stutter* closes to 600 Hz; reverb grows; low noise from bar 7 | low cut, pitch, stereo, noise low cut |
+| **Dark Forest** | dark / forest | low cut *Hollow 48 / Carve* and high cut *Hollow 12 / Warble* close in; a low wind of noise (150–720 Hz); a long cavern tail | pitch, stereo |
+| **Dissolve** | psychill | reverb to a full 12 s wash that swallows the dry; low cut to 250 Hz, high cut to 4.5 kHz to keep it clean | pitch, noise, stereo |
+| **White-Out** | noise riser | noise sweeps 135 Hz to 15 kHz and up to −7.5 dB, its low cut climbing to 1.3 kHz; reverb blurs the loop | both cuts, pitch, stereo |
+| **Squeeze** | telephone | both cuts close in on the mids (650 Hz to 3 kHz) while the image goes mono | pitch, noise, reverb |
+| **Vacuum** | late slam | nothing until bar 9, then low cut *Extreme 48 / Feed* to 1.5 kHz, a noise sweep and a collapse to mono; bone dry | high cut, pitch, reverb, noise low cut |
+
+The presets were tuned by measurement: `buildapp_render <dir>` (built with
+the core) renders every preset over a 16-bar build plus 4 bars of drop on the
+built-in loop to WAV and prints loudness, brightness and width per bar.
+
 ## How it sounds the way it does
 
-**Filters** (`src/core/fx/CutFilters.cpp`). Each cut is two trapezoidal
-state-variable filters in series (Simper / Zavalishin zero-delay feedback):
-the bilinear transform of the analog 2-pole with the cutoff prewarped, so the
-cutoff is exact, and with a state that stays smooth when the coefficients
-change every sample. The second stage is resonant (Q 0.60 + 2.1), which puts a
-+3 dB bump on the corner: the sweep sings without whistling. The cutoff glides
-per sample in log frequency (20 ms), so automation steps and fast moves sweep
-evenly. The filters run oversampled with polyphase IIR halfbands (HIIR-style
-elliptic allpass chains, 130 dB stopband): 4× at 44.1/48 kHz, 2× at 88.2/96 kHz.
-The tests measure the response against the analog prototype: within 0.25 dB
-wherever it is above −24 dB, up to 17 kHz (0.3 dB at 18 kHz), at every rate.
-Switching a filter on or off is a smoothstep crossfade, and a filter wakes up
-settled on the signal, so the tests find nothing above the noise floor when it
-happens.
+**Filters** (`CharacterFilter.cpp`, `FilterStyles.cpp`, `CutFilters.cpp`).
+Each cut works the way FabFilter Volcano 3's filters do, worked out from its
+binary and style files: a Chamberlin state-variable filter run three times per
+sample on the held input (frequency coefficient 2 sin(π fc / 3 fs)), one stage
+for 12 dB/oct, two for 24, four for 48, the band state clamped to ±1 and the
+low state to ±10, then an atan soft clipper. Each of the eleven styles (Classic,
+Smooth, Raw, Hard, Hollow, Extreme, Gentle, Tube, Metal, Easy Going, Clean) adds
+an input gain, its clipper hardness and measured 11×11 surfaces that map
+cutoff and resonance to the clipper drive, a cubic band damping and the
+resonance the core really runs at; Clean is the linear core. The types in the
+menus pair a style with a slope, a drive and an auto-resonance curve.
+The cutoff glides per sample in log frequency (20 ms) and the resonance after
+it (30 ms); changing type crossfades from the old filter to the new one,
+which starts from the old one's state. Live the filters run at the host rate
+like Volcano's; offline renders run them 4× oversampled (2× at 88.2/96 kHz)
+through polyphase IIR halfbands, which cuts their aliasing by 15 dB and more
+(Volcano's own "High Quality" only oversamples the clipper and measures within
+a dB of normal). The spectrum draws the exact small-signal response, which
+the tests check against a quiet sine through every type at every rate.
 
-**Pitch** (`PitchShifter.cpp`). A delay line read faster than it is written.
-When the read head catches up it splices back 10–30 ms, to the point where
-the material best matches itself (normalised correlation, refined to a
-fraction of a sample), so splices land in phase with the kick, bass or lead
-underneath. The crossfade moves from equal gain to equal power with how well
-it matched. On tonal material the splices measure better than −85 dB residual.
-A 4-pole lowpass at 0.45 fs / ratio in front keeps the top octave from folding
-back. Above 0 semitones the signal runs 10–40 ms late; no delay-line shifter
-avoids that, so expect some flamming against the dry signal at dry/wet below 100 %.
+**Pitch** (`PitchShifter.cpp`). A phase vocoder with peak locking
+(Laroche & Dolson): every spectral peak and the bins around it move up
+together, with their phases turned by how far that partial has travelled, so
+partials come out at exactly the interval and keep their shape. A frame where
+the highs jump (a hit) restarts from the analysed phases, so drums keep their
+attack. The frames are taken of the analytic signal (a 90° allpass pair), so
+a low note's mirror image cannot leak into it: a 41 Hz sine shifts with
+−53 dB residual or better (−18 to −28 dB without). That allpass pair runs
+the lows late (7 ms at 30 Hz), so each bin turns its phase back out and
+kicks land in one piece.
+The analysis window is 4096 points but asymmetric, with an 8 ms tail and a
+synthesis window on that tail only (Mauler & Martin), so the shifted signal
+runs 16 ms late. Only while the pitch is up: at 0 semitones the stage passes
+the signal untouched with no delay, and it fades in and out over 25 ms.
+Offline renders use an analysis window twice as long at the same 16 ms, so a
+bounce lines up with what was heard. On an eight-note chord the artifacts sit
+15–17 dB (live) and 17–21 dB (export) under the shifted notes; the old
+delay-line shifter managed 2–9 dB. The 16 ms is not reported to the host, so
+expect a little flamming against the dry signal at dry/wet below 100 %.
 
 **Noise** (`NoiseSource.cpp`). Independent white noise per channel through a
 resonant 2-pole lowpass with a highpass two octaves under it. The gain that
 keeps its RMS at −12 dBFS (full volume) wherever the band sits is computed
-from the filter response.
+from the filter response. The noise low cut (4-pole Butterworth) comes after
+that gain, so it takes the lows away instead of being made up for.
 
 **Reverb** (`Reverb.cpp`). The send is cut below 160 Hz and above 9 kHz, so
 the wash never muddies kick and bass. Four diffusion steps (8 channels each:
@@ -112,13 +173,15 @@ The DSP doesn't depend on JUCE and builds in seconds:
 cmake -B build-core -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILDAPP_BUILD_PLUGIN=OFF
 cmake --build build-core
 ./build-core/buildapp_tests
+./build-core/buildapp_render <dir>   # every preset's build as WAV, with per-bar measurements
 ```
 
 ### UI snapshots
 
 `build/buildapp_snapshot_artefacts/Release/buildapp_snapshot <dir>`
-renders the editor to PNGs (rest, build, peak, cuts) with the built-in loop
-playing through it, no DAW needed. `... <dir> bench` times the paints instead.
+renders the editor to PNGs (rest, build, peak, cuts, types, and the presets
+rise, squeeze and vacuum) with the built-in loop playing through it, no DAW
+needed. `... <dir> bench` times the paints instead.
 
 ### Trying it without a DAW
 
@@ -163,12 +226,12 @@ installer is not signed, so SmartScreen asks once (More info > Run anyway).
 
 ```
 src/core/dsp       trapezoidal SVF, polyphase halfbands, smoothers, FFT
-src/core/fx        cut filters, pitch shifter, noise, reverb, the chain, knob mappings
+src/core/fx        cut filters, pitch shifter, noise, reverb, the chain, knob mappings, presets
 src/core/analysis  lock-free audio taps, live spectrum
 src/plugin         JUCE processor and editor, number formatting
-src/ui             theme, knobs and meters, spectrum view
+src/ui             theme, knobs and meters, spectrum view, build timeline
 tests/             Catch2 tests for the core, test signals (incl. the psy loop)
-tools/             offscreen UI snapshot tool, demo host
+tools/             offscreen UI snapshot tool, demo host, preset renderer
 packaging/         macOS pkg and Windows installer scripts
 ```
 
