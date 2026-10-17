@@ -2,7 +2,7 @@
 
 A buildup effect for psytrance. Put it on the loop or the group you want to
 build, ride the knobs over the last bars, and pull them back for the drop.
-Twelve knobs and two filter-type menus, one chain. Or pick one of ten presets
+Twelve knobs and two filter-type menus, one chain. Or pick one of nineteen presets
 and ride a single knob, **BUILD**, that moves the rest for you:
 
 ![BuildApp in the Full-On Rise preset, 70 % into the build](docs/screenshot.png)
@@ -47,8 +47,9 @@ the footer says what it does.
 ### The display
 
 - **A — Build**: the preset menu, a timeline of what the preset does (one lane
-  per control it drives, lit in green from where it starts moving up to
-  BUILD, with the value there on the right) and the BUILD knob. Click or drag
+  per control it drives, plus the reverb and the level, which carry the fade
+  into the tail; each lit in green from where it starts moving up to BUILD,
+  with the value there on the right) and the BUILD knob. Click or drag
   the timeline to scrub BUILD; double-click it to drop to 0. With the preset
   Off the band folds away to its menu and the window gets shorter.
 - **B — Spectrum**: the input (faint line) and the output (filled), with the
@@ -64,20 +65,53 @@ the footer says what it does.
 ## Presets: the build on one knob
 
 Pick a preset and every control it uses is locked to a path along BUILD's
-travel: BUILD at 0 % leaves the signal untouched (bit for bit), 100 % is the
-top of the build, and pulling it back to 0 is the drop. Automate BUILD over
-the 8 or 16 bars before the drop. **Level** and **Dry/Wet** always stay
-yours, and so does every knob the preset leaves out. Your own knob settings
-wait underneath: switch the preset to Off and they're back.
+travel. Automate BUILD over the 8 or 16 bars before the drop. **Level** and
+**Dry/Wet** always stay yours, and so does every knob the preset leaves out.
+Your own knob settings wait underneath: switch the preset to Off and they're
+back.
+
+- **0 %**: most presets leave the signal untouched here (bit for bit), so
+  pulling BUILD back to 0 is the drop. Sunrise, the Pumping Up presets,
+  Downsweep and Freefall start at a setting of their own instead (a closed
+  lowpass, the downlifter's hit): no fade-in to automate.
+- **0 to 75 %**: the preset's path, the build itself. Every control reaches
+  its top here.
+- **75 to 80 %**: the reverb comes up to at least 55 % for the tail (its knob
+  locks from here on).
+- **80 to 100 %**: only now does the level go, evenly in dB, from wherever the
+  preset's gain left it down to −20 dB. The fade sits before the reverb, so
+  the tail follows the music down. Stop at 75 % for the top of the path
+  without any of this.
 
 The paths follow what producers do by hand: entries are staggered (the low end
 thins first, noise comes in mid-build, pitch rises late, the reverb opens in
 the last third, the image narrows on the last bar), most of the motion is in
 the last quarter, and brightness rises with the tension. Each preset holds its
 loudness within a few LU of the dry signal (a makeup gain lane fills in where
-the cuts take the low end away), so the drop is what hits.
+the cuts take the low end away), so the drop is what hits. The noise sits
+under the music: about 10 LU under it mid-build and 2 to 3 LU under it at the
+top (White-Out, the noise riser, reaches level).
 
-| Preset | Style | What moves (on a 16-bar build) | Left to you |
+The three **Progressive** presets build the way progressive (psy)trance
+does instead: an even climb with no late slam (they suit 16 to 32 bars),
+the rolling bass thinned under a soft 12 dB low cut but never gone until the
+drop, a lowpass that opens rather than closes, noise as air rather than
+rumble, and the image or the wash pulled in on the last bar so the drop
+lands in a tight, dry space.
+
+The three **Pumping Up** presets bring the groove back the psytrance way:
+it starts under a steep 48 dB lowpass, only the kick and bass pumping, and
+opens from the bottom up. As it lets go near 20 kHz the low cut has already
+started under 50 Hz and climbs on, so the two read as one sweep into the drop.
+
+The three **Downlift** presets go the other way, for the bars after an impact
+or into a break: 0 % is the hit, and BUILD takes it down.
+
+The bars below count along a 16-bar path (the first 75 % of BUILD). Every
+preset also ends in the fade towards its tail, so past 75 % the reverb is the
+preset's even where the table leaves it to you.
+
+| Preset | Style | What moves (on a 16-bar path) | Left to you |
 |--------|-------|-------------------------------|-------------|
 | **Full-On Rise** | the classic | low cut *Classic 24 / Rise* climbs to 920 Hz; noise from bar 2, sweeping up to 9 kHz; reverb from bar 9; the image narrows on the last two bars | high cut, pitch, noise low cut |
 | **Rocket** | hi-tech | pitch from bar 5 to +12 st, slow then fast; low cut *Hard 48 / Flay* to 400 Hz; bright noise; a little narrowing at the end | high cut, reverb, noise low cut |
@@ -89,10 +123,20 @@ the cuts take the low end away), so the drop is what hits.
 | **White-Out** | noise riser | noise sweeps 135 Hz to 15 kHz and up to −7.5 dB, its low cut climbing to 1.3 kHz; reverb blurs the loop | both cuts, pitch, stereo |
 | **Squeeze** | telephone | both cuts close in on the mids (650 Hz to 3 kHz) while the image goes mono | pitch, noise, reverb |
 | **Vacuum** | late slam | nothing until bar 9, then low cut *Extreme 48 / Feed* to 1.5 kHz, a noise sweep and a collapse to mono; bone dry | high cut, pitch, reverb, noise low cut |
+| **Sunrise** | progressive filter build | starts under high cut *Classic 48 / Gate* at 930 Hz, which opens evenly to 13 kHz, its resonance 35 to 55 %; low cut *Gentle 12 / Soft* to 355 Hz; noise from bar 5 follows the filter up (850 Hz to 6.8 kHz) | pitch, reverb, stereo, noise low cut |
+| **Prog Roller** | prog psy groove | low cut *Smooth 12 / Pump* takes the sub in bar 1, then climbs evenly to 315 Hz; air from bar 2 (3.1 to 8 kHz, −31 to −14 dB); the image narrows evenly from bar 5 to 45 % width; bone dry | high cut, pitch, reverb, noise low cut |
+| **Inhale** | wash and breath | a wash from bar 2 swelling to 7.7 s by bar 14, an airy noise (1.8 to 11.5 kHz, its low cut 400 Hz to 1.8 kHz), low cut *Clean 48 / Steep* slow to 140 Hz; then the last bars breathe in: tail to 1.5 s, low cut to 820 Hz, near mono | high cut, pitch |
+| **Bottom Up** | pumping up | starts under high cut *Classic 48 / Gate* at 190 Hz (resonance 30 to 40 %) and a 40 % wide image; the lowpass lingers low, then opens to off by bar 12 as the image widens; low cut *Smooth 12 / Pump* takes over from bar 11 to 540 Hz | pitch, noise, reverb |
+| **Handover** | pumping up, then full-on | starts under high cut *Hard 48 / Drive* at 170 Hz, open by bar 8; low cut *Classic 24 / Rise* takes over from bar 7 to 920 Hz; noise from bar 8 up to 9 kHz; reverb from bar 10; the image narrows at the end | pitch, noise low cut |
+| **Surface** | up from underwater | starts under high cut *Classic 48 / Gate* at 260 Hz in a 3.7 s wash; the lowpass opens by bar 10 while the wash dries; low cut *Classic 12 / Thin* from bar 9 to 300 Hz; a 2.7 s tail comes back | pitch, noise, stereo |
+| **Downsweep** | noise downlifter | starts at the hit: noise at −19 dB and 11.6 kHz falls fast, then slower, to 135 Hz and −49 dB, its low cut falling with it; high cut *Classic 12 / Vintage* closes to 1.8 kHz; the tail grows from 1.9 to 5.5 s | low cut, pitch, stereo |
+| **Freefall** | pitch downlifter | starts an octave up and falls back to the original pitch, slow then fast; high cut *Hard 24 / Montoya* closes from bar 5 to 1.1 kHz; a noise burst at the hit falls from 8.9 kHz; the tail grows to 4.9 s | low cut, stereo, noise low cut |
+| **Sink** | lowpass downlifter | high cut *Classic 48 / Gate* sinks the music to 150 Hz, fast at first; a rumble from bar 3 falls from 1.1 kHz to 100 Hz; the tail grows to 6.9 s; the image narrows from bar 7 to 40 % | low cut, pitch |
 
 The presets were tuned by measurement: `buildapp_render <dir>` (built with
-the core) renders every preset over a 16-bar build plus 4 bars of drop on the
-built-in loop to WAV and prints loudness, brightness and width per bar.
+the core) renders every preset over a 16-bar build (BUILD 0 to 100 %, the fade
+included) plus 4 bars of drop on the built-in loop to WAV and prints loudness,
+brightness and width per bar.
 
 ## How it sounds the way it does
 
@@ -192,7 +236,7 @@ cmake --build build-core
 
 `build/buildapp_snapshot_artefacts/Release/buildapp_snapshot <dir>`
 renders the editor to PNGs (rest, build, peak, cuts, types, and the presets
-rise, squeeze and vacuum) with the built-in loop playing through it, no DAW
+rise, squeeze, vacuum, sunrise, pumping, tail and downlift) with the built-in loop playing through it, no DAW
 needed. `... <dir> bench` times the paints instead.
 
 ### Trying it without a DAW

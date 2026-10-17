@@ -73,8 +73,10 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     juce::RangedAudioParameter& param (const char* id) const { return *apvts.getParameter (id); }
 
-    // The knobs as the chain reads them, the preset's applied (any thread).
+    // The knobs as the chain reads them, the preset's applied (any thread),
+    // and as they stand, without it.
     ba::Settings settings() const noexcept;
+    ba::Settings ownSettings() const noexcept;
     // The preset BUILD drives, or nullptr when PRESET is Off; BUILD, 0..1.
     const ba::Preset* activePreset() const noexcept;
     float buildAmount() const noexcept;

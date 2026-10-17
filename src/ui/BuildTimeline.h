@@ -7,13 +7,16 @@
 
 class BuildAppProcessor;
 
-// Section A's timeline: what the preset does over BUILD's travel. One lane
-// per control it drives, in the knob row's order: the control's path over
-// the build, scaled to its own range so you see when it moves (gain keeps
-// 0 dB in view), with the part already built in the signal colour. A
-// playhead marks BUILD; each lane ends in the control's value there, in the
-// knob's own words. Click or drag to scrub BUILD, double-click to drop it
-// back to 0. Hidden with no preset (the editor folds the band away).
+// Section A's timeline: what the preset does over BUILD's travel, as the
+// chain runs it (the path, then the fade into the tail past it). One lane
+// per control it drives, in the knob row's order, plus the reverb (every
+// preset ends in a tail) and the level (its makeup gain and the fade): the
+// control's path over the build, scaled to its own range so you see when it
+// moves (level keeps 0 dB in view), with the part already built in the
+// signal colour. A playhead marks BUILD; each lane ends in the control's
+// value there, in the knob's own words. Click or drag to scrub BUILD,
+// double-click to drop it back to 0. Hidden with no preset (the editor
+// folds the band away).
 class BuildTimeline : public juce::Component
 {
 public:
@@ -36,10 +39,10 @@ private:
     struct Row
     {
         juce::String label;
-        const ba::Lane& lane;
+        std::function<float (const ba::Settings&)> value;
         std::function<float (float)> height;        // value -> 0..1 of the lane
         std::function<juce::String (float)> text;   // value -> the knob's words
-        bool bipolar = false;                       // drawn around the middle (gain)
+        bool bipolar = false;                       // drawn around the middle (level)
     };
 
     std::vector<Row> rows (const ba::Preset&) const;
@@ -49,6 +52,6 @@ private:
 
     BuildAppProcessor& proc;
     const ba::Preset* shownPreset = nullptr;
-    float shownBuild = -1.f;
+    float shownBuild = -1.f, shownReverb = -1.f;
     bool dragging = false;
 };

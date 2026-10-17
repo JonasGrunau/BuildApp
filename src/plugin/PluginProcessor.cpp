@@ -125,7 +125,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
 
     layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::preset, 3 }, "Preset", presetNames(), 0));
     layout.add (std::make_unique<AudioParameterFloat> (
-        ParameterID { ids::build, 3 }, "Build", unit (0.f, 100.f), 0.f,
+        ParameterID { ids::build, 4 }, "Build", unit (0.f, 100.f), 0.f,
         Attr().withLabel ("%")
               .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
               .withValueFromStringFunction ([] (const String& t) { return (float) juce::jlimit (0.0, 100.0, fmt::parse (t)); })));
@@ -134,6 +134,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
 }
 
 ba::Settings BuildAppProcessor::settings() const noexcept
+{
+    const auto s = ownSettings();
+    if (const auto* p = activePreset()) return ba::applyPreset (*p, buildAmount(), s);
+    return s;
+}
+
+ba::Settings BuildAppProcessor::ownSettings() const noexcept
 {
     ba::Settings s;
     s.lowCut = raw (Raw::lowCut);
@@ -153,7 +160,6 @@ ba::Settings BuildAppProcessor::settings() const noexcept
     s.levelDb = raw (Raw::level);
     s.mix = raw (Raw::mix) / 100.f;
     s.highQuality = isNonRealtime();
-    if (const auto* p = activePreset()) s = ba::applyPreset (*p, buildAmount(), s);
     return s;
 }
 

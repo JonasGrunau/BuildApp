@@ -12,8 +12,10 @@
 // Presets: one BUILD knob drives a buildup along a designed path. Each preset
 // gives some controls a lane, the control's position along BUILD's travel;
 // the controls it gives no lane stay the user's. Output level and dry/wet
-// are never driven. At BUILD 0 every lane is at rest, so the signal passes
-// bit for bit; pulling BUILD back to 0 is the drop.
+// are never driven. Most presets rest at BUILD 0 (the signal passes bit for
+// bit, and pulling BUILD back to 0 is the drop); some start at a setting of
+// their own (below). Past 75 % every preset fades towards its reverb tail
+// (kPathEnd).
 //
 // How the paths were chosen (what a producer does by hand over a 16-bar
 // build, BUILD rising linearly with the bars):
@@ -27,7 +29,46 @@
 //     return of the low end is what hits;
 //   - brightness tracks tension: the noise and the cuts move up in frequency;
 //   - perceived loudness holds within a few LU of the dry loop (the gain lane
-//     makes up where the cuts take more away than the noise and reverb fill).
+//     makes up where the cuts take more away than the noise and reverb fill);
+//   - the noise sits under the music, about 10 LU under it mid-build and 2
+//     to 3 LU under it at the top (White-Out, where the noise is the point,
+//     reaches level). When a cut thins the music, the gain lane holds the
+//     loudness, not the noise.
+//
+// The Progressive presets (Sunrise, Prog Roller, Inhale) break two of those
+// rules on purpose, because progressive (psy)trance builds differently:
+//   - the climb is even: 16 to 32 bars that keep rising instead of piling
+//     into the last quarter, so curves stay near 1 and entries come early;
+//   - the groove survives: a soft 12 dB low cut takes the sub and thins the
+//     rolling bass but stops near 300-400 Hz, and the drop gives the low end
+//     back;
+//   - the lowpass opens: the classic progressive build starts muffled and
+//     opens into the drop. BUILD 0 has to be at rest, so the high cut drops
+//     in over the first bar and opens from there, and brightness still rises
+//     with tension;
+//   - the noise is air (high, its own low cut up), not a rumble;
+//   - the image narrows gradually as a tension axis, and the wash is pulled
+//     back on the last bar so the drop lands in a tight, dry space (the
+//     breath before the drop).
+//
+// The Pumping Up presets (Bottom Up, Handover, Surface) do what psytrance
+// does when the groove comes back after a break: it returns lowpassed, only
+// the kick and bass pumping, and a steep lowpass opens from the bottom up.
+// Their 0 % is that closed lowpass. It lingers low (curve > 1) and lets go
+// near 20 kHz just after the low cut has started under 50 Hz, so the two
+// read as one sweep that climbs on into the drop. They differ in where the
+// handover falls: three quarters in (Bottom Up), halfway (Handover, then a
+// full-on rise), or out of a wash (Surface).
+//
+// The Downlift presets go the other way, for the bars after an impact or
+// into a break: their 0 % is the moment of the hit (bright noise, the loop
+// an octave up, or the full mix), and BUILD takes it down: noise falling to
+// a rumble, the pitch falling back, a lowpass sinking, the tail growing.
+//
+// Most presets rest at BUILD 0 (every lane at rest, the signal untouched
+// bit for bit, so BUILD back to 0 is the drop). A preset whose 0 % is a
+// setting of its own (Sunrise, the Pumping Up and some Downlift presets)
+// starts there instead; switch it off to leave it.
 namespace ba
 {
     // A point on a lane: at BUILD `at` (0..1) the control is at `value` (a knob
@@ -117,9 +158,10 @@ namespace ba
 
     // Knob positions used below (Mapping.h):
     //   low cut    0.20 66 Hz, 0.30 121 Hz, 0.40 221 Hz, 0.50 400 Hz, 0.60 727 Hz, 0.70 1.32 kHz
-    //   high cut   0.85 9 kHz, 0.70 4.1 kHz, 0.60 2.4 kHz, 0.50 1.41 kHz, 0.40 832 Hz
-    //   noise      0.35 -27 dB, 0.45 -21 dB, 0.55 -15.6 dB, 0.66 -10.8 dB, 0.8 -5.8 dB, 1 0 dB
+    //   high cut   0.90 11.8 kHz, 0.85 9 kHz, 0.70 4.1 kHz, 0.60 2.4 kHz, 0.50 1.41 kHz, 0.40 832 Hz
+    //   noise      0.3 -31 dB, 0.35 -27 dB, 0.45 -21 dB, 0.55 -15.6 dB, 0.66 -10.8 dB, 0.8 -5.8 dB, 1 0 dB
     //   noise pitch 0.1 135 Hz, 0.3 385 Hz, 0.5 1.1 kHz, 0.7 3.1 kHz, 0.9 8.9 kHz, 1 15 kHz
+    //   noise cut  as the low cut: 0.5 400 Hz, 0.75 1.8 kHz
     //   reverb     0.3 2.3 s, 0.5 4.3 s, 0.7 6.9 s, 1 12 s
     //   stereo     0 full width .. 1 mono
     inline constexpr Preset kPresets[] = {
@@ -127,24 +169,24 @@ namespace ba
           .help = "The classic: lows thin out, noise rises, the reverb opens late, the image narrows.",
           .lowCutType = lowType ("Classic 24 / Rise"),
           .lowCut = { { 0.f, 0.f }, { 0.15f, 0.22f }, { 0.5f, 0.4f }, { 0.8f, 0.52f }, { 1.f, 0.64f } },
-          .noise = { { 0.f, 0.f }, { 0.1f, 0.f }, { 0.4f, 0.52f }, { 0.8f, 0.68f }, { 1.f, 0.78f } },
+          .noise = { { 0.f, 0.f }, { 0.1f, 0.f }, { 0.4f, 0.41f }, { 0.8f, 0.45f }, { 1.f, 0.49f } },
           .noisePitch = { { 0.f, 0.3f }, { 0.4f, 0.5f }, { 1.f, 0.9f } },
           .reverb = { { 0.f, 0.f }, { 0.55f, 0.f }, { 0.85f, 0.35f }, { 1.f, 0.55f } },
           .stereo = { { 0.f, 0.f }, { 0.85f, 0.f }, { 1.f, 0.65f } },
-          .gain = { { 0.f, 0.f }, { 0.25f, 0.f }, { 0.55f, 2.f }, { 0.85f, 1.f }, { 1.f, 0.5f } } },
+          .gain = { { 0.f, 0.f }, { 0.25f, 0.f }, { 0.55f, 3.4f }, { 0.85f, 3.2f }, { 1.f, 5.5f } } },
 
         { .name = "Rocket", .section = "Rise",
           .help = "Hi-tech riser: the whole loop climbs an octave, slow then fast, with bright noise.",
           .lowCutType = lowType ("Hard 48 / Flay"),
           .lowCut = { { 0.f, 0.f }, { 0.3f, 0.25f }, { 1.f, 0.5f } },
           .pitch = { { 0.f, 0.f }, { 0.25f, 0.f }, { 1.f, 12.f, 2.2f } },
-          .noise = { { 0.f, 0.f }, { 0.2f, 0.f }, { 0.6f, 0.55f }, { 1.f, 0.78f } },
+          .noise = { { 0.f, 0.f }, { 0.2f, 0.f }, { 0.6f, 0.42f }, { 1.f, 0.53f } },
           .noisePitch = { { 0.f, 0.55f }, { 1.f, 1.f } },
           .stereo = { { 0.f, 0.f }, { 0.75f, 0.f }, { 1.f, 0.4f } },
-          .gain = { { 0.f, 0.f }, { 0.25f, 0.f }, { 0.6f, 3.f }, { 0.9f, 1.f }, { 1.f, 0.f } } },
+          .gain = { { 0.f, 0.f }, { 0.25f, 0.f }, { 0.6f, 3.4f }, { 1.f, 2.8f } } },
 
         { .name = "Stairs", .section = "Rise",
-          .help = "Goa staircase: a semitone up every sixteenth of BUILD, an octave at the top.",
+          .help = "Goa staircase: the loop climbs a semitone at a time, an octave at the top.",
           .lowCutType = lowType ("Classic 12 / Thin"),
           .lowCut = { { 0.f, 0.f }, { 0.25f, 0.15f }, { 1.f, 0.45f } },
           .pitch = { { { 0.f, 0.f }, { 0.1875f, 0.f }, { 0.9375f, 12.f }, { 1.f, 12.f } }, 1.f },
@@ -175,11 +217,11 @@ namespace ba
           .lowCut = { { 0.f, 0.f }, { 0.4f, 0.25f }, { 1.f, 0.4f } },
           .highCutType = highType ("Hollow 12 / Warble"),
           .highCut = { { 0.f, 1.f }, { 0.2f, 0.85f }, { 1.f, 0.55f } },
-          .noise = { { 0.f, 0.f }, { 0.15f, 0.4f }, { 1.f, 0.72f } },
+          .noise = { { 0.f, 0.f }, { 0.15f, 0.35f }, { 1.f, 0.56f } },
           .noisePitch = { { 0.f, 0.12f }, { 0.7f, 0.3f }, { 1.f, 0.42f } },
           .noiseLowCut = { { 0.f, 0.2f } },
           .reverb = { { 0.f, 0.f }, { 0.25f, 0.2f }, { 1.f, 0.8f, 1.5f } },
-          .gain = { { 0.f, 0.f }, { 0.2f, 1.5f }, { 0.6f, 3.f }, { 1.f, 1.f } } },
+          .gain = { { 0.f, 0.f }, { 0.2f, 1.5f }, { 0.5f, 4.f }, { 0.8f, 3.5f }, { 1.f, 1.f } } },
 
         { .name = "Dissolve", .section = "Wash",
           .help = "The loop dissolves into a long wash that swallows the dry signal.",
@@ -211,17 +253,120 @@ namespace ba
           .help = "Late slam for short builds: nothing until halfway, then a sharp rise into dry mono.",
           .lowCutType = lowType ("Extreme 48 / Feed"),
           .lowCut = { { 0.f, 0.f }, { 0.55f, 0.f }, { 1.f, 0.72f, 1.8f } },
-          .noise = { { 0.f, 0.f }, { 0.55f, 0.f }, { 1.f, 0.85f, 1.2f } },
+          .noise = { { 0.f, 0.f }, { 0.55f, 0.f }, { 1.f, 0.48f, 0.8f } },
           .noisePitch = { { 0.f, 0.4f }, { 0.55f, 0.4f }, { 1.f, 1.f, 1.5f } },
           .stereo = { { 0.f, 0.f }, { 0.7f, 0.f }, { 1.f, 1.f, 2.f } },
-          .gain = { { 0.f, 0.f }, { 0.7f, 0.f }, { 0.85f, 3.5f }, { 1.f, 0.5f } } },
+          .gain = { { 0.f, 0.f }, { 0.7f, 0.f }, { 0.85f, 3.2f }, { 1.f, 5.5f } } },
+
+        { .name = "Sunrise", .section = "Progressive",
+          .help = "Starts under a lowpass that opens across the build while the lows thin away.",
+          .lowCutType = lowType ("Gentle 12 / Soft"),
+          .lowCut = { { 0.f, 0.f }, { 0.25f, 0.12f }, { 1.f, 0.48f, 1.4f } },
+          .highCutType = highType ("Classic 48 / Gate"),
+          .highCut = { { 0.f, 0.42f }, { 1.f, 0.92f } },
+          .highReso = { { 0.f, 0.35f }, { 1.f, 0.55f } },
+          .noise = { { 0.f, 0.f }, { 0.25f, 0.f }, { 1.f, 0.5f } },
+          .noisePitch = { { 0.f, 0.45f }, { 1.f, 0.85f } },
+          .gain = { { 0.f, 0.f }, { 0.4f, 0.f }, { 1.f, 3.5f } } },
+
+        { .name = "Prog Roller", .section = "Progressive",
+          .help = "The bass keeps rolling under a soft low cut; air rises, the image narrows.",
+          .lowCutType = lowType ("Smooth 12 / Pump"),
+          .lowCut = { { 0.f, 0.f }, { 0.05f, 0.15f }, { 0.75f, 0.36f }, { 1.f, 0.46f } },
+          .noise = { { 0.f, 0.f }, { 0.1f, 0.3f }, { 1.f, 0.58f } },
+          .noisePitch = { { 0.f, 0.7f }, { 1.f, 0.88f } },
+          .stereo = { { 0.f, 0.f }, { 0.25f, 0.f }, { 1.f, 0.55f } },
+          .gain = { { 0.f, 0.f }, { 0.06f, -1.5f }, { 0.45f, 0.f }, { 1.f, 2.5f } } },
+
+        { .name = "Inhale", .section = "Progressive",
+          .help = "An airy wash swells across the build; the last bar breathes it in: dry, thin, narrow.",
+          .lowCutType = lowType ("Clean 48 / Steep"),
+          .lowCut = { { 0.f, 0.f }, { 0.2f, 0.15f }, { 0.9f, 0.32f }, { 1.f, 0.62f, 1.5f } },
+          .noise = { { 0.f, 0.f }, { 0.1f, 0.3f }, { 0.8f, 0.46f }, { 1.f, 0.44f } },
+          .noisePitch = { { 0.f, 0.6f }, { 1.f, 0.95f } },
+          .noiseLowCut = { { 0.f, 0.5f }, { 1.f, 0.75f } },
+          .reverb = { { 0.f, 0.f }, { 0.1f, 0.15f }, { 0.85f, 0.75f, 0.9f }, { 1.f, 0.2f } },
+          .stereo = { { 0.f, 0.f }, { 0.9f, 0.f }, { 1.f, 0.85f, 1.5f } },
+          .gain = { { 0.f, 0.f }, { 0.25f, 1.5f }, { 0.6f, 3.5f }, { 0.85f, 3.5f }, { 1.f, 7.5f } } },
+
+        { .name = "Bottom Up", .section = "Pumping Up",
+          .help = "The groove pumps up from the bottom as the lowpass opens; the low cut takes over.",
+          .lowCutType = lowType ("Smooth 12 / Pump"),
+          .lowCut = { { 0.f, 0.f }, { 0.68f, 0.f }, { 1.f, 0.55f } },
+          .highCutType = highType ("Classic 48 / Gate"),
+          .highCut = { { 0.f, 0.12f }, { 0.75f, 1.f, 1.8f } },
+          .highReso = { { 0.f, 0.3f }, { 1.f, 0.4f } },
+          .stereo = { { 0.f, 0.6f }, { 0.75f, 0.f }, { 1.f, 0.3f } },
+          .gain = { { 0.f, -2.5f }, { 0.6f, -1.8f }, { 0.78f, -3.f }, { 1.f, 5.5f } } },
+
+        { .name = "Handover", .section = "Pumping Up",
+          .help = "The lowpass opens over the first half, then the low cut rises into a full-on build.",
+          .lowCutType = lowType ("Classic 24 / Rise"),
+          .lowCut = { { 0.f, 0.f }, { 0.4f, 0.f }, { 1.f, 0.64f } },
+          .highCutType = highType ("Hard 48 / Drive"),
+          .highCut = { { 0.f, 0.1f }, { 0.5f, 1.f } },
+          .noise = { { 0.f, 0.f }, { 0.45f, 0.f }, { 0.8f, 0.4f }, { 1.f, 0.47f } },
+          .noisePitch = { { 0.f, 0.4f }, { 1.f, 0.9f } },
+          .reverb = { { 0.f, 0.f }, { 0.6f, 0.f }, { 1.f, 0.45f } },
+          .stereo = { { 0.f, 0.f }, { 0.85f, 0.f }, { 1.f, 0.6f } },
+          .gain = { { 0.f, -1.f }, { 0.5f, -1.2f }, { 0.75f, 2.f }, { 1.f, 6.f } } },
+
+        { .name = "Surface", .section = "Pumping Up",
+          .help = "Up from underwater: a steep, washed lowpass opens and dries out, then the lows thin.",
+          .lowCutType = lowType ("Classic 12 / Thin"),
+          .lowCut = { { 0.f, 0.f }, { 0.5f, 0.f }, { 1.f, 0.45f } },
+          .highCutType = highType ("Classic 48 / Gate"),
+          .highCut = { { 0.f, 0.18f }, { 0.6f, 1.f, 1.8f } },
+          .reverb = { { 0.f, 0.45f }, { 0.6f, 0.1f }, { 1.f, 0.35f } },
+          .gain = { { 0.f, -1.f }, { 0.3f, -3.3f }, { 0.55f, -0.8f }, { 1.f, 5.f } } },
+
+        { .name = "Downsweep", .section = "Downlift",
+          .help = "Bright noise falls to a rumble and fades while the top closes and the tail grows.",
+          .highCutType = highType ("Classic 12 / Vintage"),
+          .highCut = { { 0.f, 1.f }, { 1.f, 0.55f, 0.7f } },
+          .noise = { { 0.f, 0.48f }, { 1.f, 0.15f, 0.7f } },
+          .noisePitch = { { 0.f, 0.95f }, { 1.f, 0.1f, 0.5f } },
+          .noiseLowCut = { { 0.f, 0.6f }, { 1.f, 0.05f, 0.5f } },
+          .reverb = { { 0.f, 0.25f }, { 1.f, 0.6f } },
+          .gain = { { 0.f, 0.f }, { 1.f, 1.f } } },
+
+        { .name = "Freefall", .section = "Downlift",
+          .help = "The loop starts an octave up and falls back down, faster and faster, under a closing top.",
+          .highCutType = highType ("Hard 24 / Montoya"),
+          .highCut = { { 0.f, 1.f }, { 0.3f, 0.9f }, { 1.f, 0.45f, 1.3f } },
+          .pitch = { { 0.f, 12.f }, { 1.f, 0.f, 1.6f } },
+          .noise = { { 0.f, 0.45f }, { 0.4f, 0.2f }, { 1.f, 0.f } },
+          .noisePitch = { { 0.f, 0.9f }, { 1.f, 0.2f } },
+          .reverb = { { 0.f, 0.15f }, { 1.f, 0.55f } },
+          .gain = { { 0.f, 0.f }, { 1.f, 1.f } } },
+
+        { .name = "Sink", .section = "Downlift",
+          .help = "A steep lowpass sinks the music down to its sub while a rumble falls and the tail grows.",
+          .highCutType = highType ("Classic 48 / Gate"),
+          .highCut = { { 0.f, 1.f }, { 0.1f, 0.85f }, { 1.f, 0.08f, 0.8f } },
+          .noise = { { 0.f, 0.f }, { 0.15f, 0.4f }, { 1.f, 0.5f } },
+          .noisePitch = { { 0.f, 0.5f }, { 1.f, 0.05f } },
+          .noiseLowCut = { { 0.f, 0.f } },
+          .reverb = { { 0.f, 0.f }, { 0.2f, 0.25f }, { 1.f, 0.7f } },
+          .stereo = { { 0.f, 0.f }, { 0.4f, 0.f }, { 1.f, 0.6f } },
+          .gain = { { 0.f, 0.f }, { 1.f, 1.f } } },
     };
 
+    // Past the path, BUILD takes every preset further, towards nothing. A
+    // preset's lanes play over BUILD 0..kPathEnd (the path, 0..1 in the
+    // lanes' own terms), where every control reaches its top. Then the reverb
+    // comes up to at least kTailReverb (by kFadeFrom), so there is a tail,
+    // and only then does the level go: evenly in dB, from wherever the
+    // preset's gain lane left it down to kFadeToDb at 100 %. The fade sits
+    // before the reverb, so the tail follows the music down.
+    inline constexpr float kPathEnd = 0.75f, kFadeFrom = 0.8f, kTailReverb = 0.55f, kFadeToDb = -20.f;
+
     // The controls a preset can take over. A cut is one control: its
-    // position, type, resonance and auto switch go together.
+    // position, type, resonance and auto switch go together. Past the path
+    // every preset takes the reverb too, for the tail.
     enum class Control { lowCut, highCut, pitch, noise, noisePitch, noiseLowCut, reverb, stereo };
 
-    inline bool drives (const Preset& p, Control c) noexcept
+    inline bool drives (const Preset& p, Control c, float build = 0.f) noexcept
     {
         switch (c)
         {
@@ -231,7 +376,7 @@ namespace ba
             case Control::noise:       return p.noise.driven();
             case Control::noisePitch:  return p.noisePitch.driven();
             case Control::noiseLowCut: return p.noiseLowCut.driven();
-            case Control::reverb:      return p.reverb.driven();
+            case Control::reverb:      return p.reverb.driven() || build > kPathEnd;
             case Control::stereo:      return p.stereo.driven();
         }
         return false;
@@ -241,21 +386,22 @@ namespace ba
     // the preset drives set to where it is at `build` (0..1).
     inline Settings applyPreset (const Preset& p, float build, Settings s) noexcept
     {
+        const float at = std::min (std::max (build, 0.f) / kPathEnd, 1.f);   // along the path
         if (p.lowCutType >= 0)
         {
-            s.lowCut = p.lowCut (build);
+            s.lowCut = p.lowCut (at);
             s.lowCutType = p.lowCutType;
             s.lowCutAuto = ! p.lowReso.driven();
-            if (! s.lowCutAuto) s.lowCutReso = p.lowReso (build);
+            if (! s.lowCutAuto) s.lowCutReso = p.lowReso (at);
         }
         if (p.highCutType >= 0)
         {
-            s.highCut = p.highCut (build);
+            s.highCut = p.highCut (at);
             s.highCutType = p.highCutType;
             s.highCutAuto = ! p.highReso.driven();
-            if (! s.highCutAuto) s.highCutReso = p.highReso (build);
+            if (! s.highCutAuto) s.highCutReso = p.highReso (at);
         }
-        const auto drive = [build] (const Lane& lane, float& knob) { if (lane.driven()) knob = lane (build); };
+        const auto drive = [at] (const Lane& lane, float& knob) { if (lane.driven()) knob = lane (at); };
         drive (p.pitch, s.pitch);
         drive (p.noise, s.noise);
         drive (p.noisePitch, s.noisePitch);
@@ -263,6 +409,27 @@ namespace ba
         drive (p.reverb, s.reverb);
         drive (p.stereo, s.stereo);
         drive (p.gain, s.makeupDb);
+
+        if (build > kPathEnd)
+        {
+            const float up = std::min ((build - kPathEnd) / (kFadeFrom - kPathEnd), 1.f);
+            s.reverb += (std::max (s.reverb, kTailReverb) - s.reverb) * up;
+            if (build > kFadeFrom)
+            {
+                const float down = std::min ((build - kFadeFrom) / (1.f - kFadeFrom), 1.f);
+                s.fadeDb = std::min (0.f, kFadeToDb - s.makeupDb) * down;
+            }
+        }
         return s;
+    }
+
+    // Whether BUILD 0 leaves the signal alone (every lane at rest there), so
+    // pulling BUILD back to 0 is the drop. The others start at a setting of
+    // their own.
+    inline bool restsAtZero (const Preset& p) noexcept
+    {
+        const auto s = applyPreset (p, 0.f, Settings {});
+        return map::lowCutOff (s.lowCut) && map::highCutOff (s.highCut) && s.pitch == 0.f && s.noise == 0.f && s.reverb == 0.f
+               && s.stereo == 0.f && s.makeupDb == 0.f;
     }
 } // namespace ba

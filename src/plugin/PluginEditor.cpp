@@ -195,7 +195,7 @@ void BuildAppEditor::showDriven()
 {
     const auto s = proc.settings();
     const auto* p = proc.activePreset();
-    const auto drives = [p] (ba::Control c) { return p != nullptr && ba::drives (*p, c); };
+    const auto drives = [p, build = proc.buildAmount()] (ba::Control c) { return p != nullptr && ba::drives (*p, c, build); };
     const auto lock = [&] (Dial& d, ba::Control c, float plain) { d.setLocked (drives (c) ? std::optional<float> (plain) : std::nullopt); };
     using C = ba::Control;
 

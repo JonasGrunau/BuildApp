@@ -11,8 +11,8 @@ BuildTimeline::BuildTimeline (BuildAppProcessor& p) : proc (p)
 
 std::vector<BuildTimeline::Row> BuildTimeline::rows (const ba::Preset& p) const
 {
-    // The knob's own text for a lane value: through its parameter, so it
-    // reads exactly like the knob.
+    // The knob's own text for a value: through its parameter, so it reads
+    // exactly like the knob.
     const auto words = [this] (const char* id, float scale = 1.f) {
         return [this, id, scale] (float v) {
             auto& prm = proc.param (id);
@@ -21,21 +21,25 @@ std::vector<BuildTimeline::Row> BuildTimeline::rows (const ba::Preset& p) const
     };
     const auto travel = [] (float v) { return v; };
     std::vector<Row> out;
-    const auto add = [&] (const char* label, const ba::Lane& lane, std::function<float (float)> height,
-                          std::function<juce::String (float)> text, bool bipolar = false) {
-        if (lane.driven()) out.push_back ({ label, lane, std::move (height), std::move (text), bipolar });
+    const auto add = [&] (bool shown, const char* label, std::function<float (const ba::Settings&)> value,
+                          std::function<float (float)> height, std::function<juce::String (float)> text, bool bipolar = false) {
+        if (shown) out.push_back ({ label, std::move (value), std::move (height), std::move (text), bipolar });
     };
-    add ("Low cut", p.lowCut, travel, words (ids::lowCut));
-    add ("Low reso", p.lowReso, travel, words (ids::lowCutReso, 100.f));
-    add ("High cut", p.highCut, [] (float v) { return 1.f - v; }, words (ids::highCut));
-    add ("High reso", p.highReso, travel, words (ids::highCutReso, 100.f));
-    add ("Pitch", p.pitch, [] (float v) { return v / (float) ba::map::kMaxPitch; }, words (ids::pitch));
-    add ("Noise", p.noise, travel, words (ids::noise));
-    add ("Noise pitch", p.noisePitch, travel, words (ids::noisePitch));
-    add ("Noise cut", p.noiseLowCut, travel, words (ids::noiseLowCut));
-    add ("Reverb", p.reverb, travel, words (ids::reverb));
-    add ("Stereo", p.stereo, travel, words (ids::stereo));
-    add ("Gain", p.gain, [] (float db) { return 0.5f + db / 12.f; }, [] (float db) { return fmt::signedNumber (db, 1) + " dB"; }, true);
+    add (p.lowCut.driven(), "Low cut", [] (const ba::Settings& s) { return s.lowCut; }, travel, words (ids::lowCut));
+    add (p.lowReso.driven(), "Low reso", [] (const ba::Settings& s) { return s.lowCutReso; }, travel, words (ids::lowCutReso, 100.f));
+    add (p.highCut.driven(), "High cut", [] (const ba::Settings& s) { return s.highCut; }, [] (float v) { return 1.f - v; }, words (ids::highCut));
+    add (p.highReso.driven(), "High reso", [] (const ba::Settings& s) { return s.highCutReso; }, travel, words (ids::highCutReso, 100.f));
+    add (p.pitch.driven(), "Pitch", [] (const ba::Settings& s) { return s.pitch; },
+         [] (float v) { return v / (float) ba::map::kMaxPitch; }, words (ids::pitch));
+    add (p.noise.driven(), "Noise", [] (const ba::Settings& s) { return s.noise; }, travel, words (ids::noise));
+    add (p.noisePitch.driven(), "Noise pitch", [] (const ba::Settings& s) { return s.noisePitch; }, travel, words (ids::noisePitch));
+    add (p.noiseLowCut.driven(), "Noise cut", [] (const ba::Settings& s) { return s.noiseLowCut; }, travel, words (ids::noiseLowCut));
+    add (true, "Reverb", [] (const ba::Settings& s) { return s.reverb; }, travel, words (ids::reverb));
+    add (p.stereo.driven(), "Stereo", [] (const ba::Settings& s) { return s.stereo; }, travel, words (ids::stereo));
+
+    // Level: the makeup gain and the fade into the tail together, in dB.
+    add (true, "Level", [] (const ba::Settings& s) { return s.makeupDb + s.fadeDb; },
+         [] (float db) { return 0.5f + db / 12.f; }, [] (float db) { return fmt::signedNumber (db, 1) + " dB"; }, true);
     return out;
 }
 
@@ -53,12 +57,13 @@ float BuildTimeline::xFor (float build) const
 void BuildTimeline::refresh()
 {
     const auto* preset = proc.activePreset();
-    const float build = proc.buildAmount();
-    if (preset == shownPreset && std::abs (build - shownBuild) < 1e-6f) return;
+    const float build = proc.buildAmount(), reverb = proc.ownSettings().reverb;   // a preset without a reverb lane tails from yours
+    if (preset == shownPreset && std::abs (build - shownBuild) < 1e-6f && reverb == shownReverb) return;
     if (preset != shownPreset)
         setMouseCursor (preset != nullptr ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
     shownPreset = preset;
     shownBuild = build;
+    shownReverb = reverb;
     repaint();
 }
 
@@ -72,10 +77,18 @@ void BuildTimeline::paint (juce::Graphics& g)
     const float build = proc.buildAmount(), playX = xFor (build);
     const auto list = rows (*preset);
     const float laneH = p.getHeight() / (float) std::max<size_t> (1, list.size());
+
+    // What the chain runs with along BUILD, sampled once for every lane.
     constexpr int kSteps = 240;
+    const auto own = proc.ownSettings();
+    std::array<ba::Settings, kSteps + 1> along;
+    for (int k = 0; k <= kSteps; ++k) along[(size_t) k] = ba::applyPreset (*preset, (float) k / kSteps, own);
+    const auto now = ba::applyPreset (*preset, build, own);
+
     for (size_t i = 0; i < list.size(); ++i)
     {
         const auto& row = list[i];
+        const auto valueAt = [&] (int k) { return row.value (along[(size_t) k]); };
         const auto lane = juce::Rectangle<float> (p.getX(), p.getY() + laneH * (float) i, p.getWidth(), laneH);
         const float top = lane.getY() + 3.f, span = lane.getHeight() - 5.f;
 
@@ -84,7 +97,7 @@ void BuildTimeline::paint (juce::Graphics& g)
         float lo = row.bipolar ? row.height (0.f) : 1e9f, hi = row.bipolar ? lo : -1e9f;
         for (int k = 0; k <= kSteps; ++k)
         {
-            const float h = row.height (row.lane ((float) k / kSteps));
+            const float h = row.height (valueAt (k));
             lo = std::min (lo, h);
             hi = std::max (hi, h);
         }
@@ -98,32 +111,32 @@ void BuildTimeline::paint (juce::Graphics& g)
         // The whole path faint; lit in the signal colour (and filled down to
         // rest) from where it leaves rest up to the playhead: at rest it
         // steps back like a knob at rest does.
-        const float startH = row.height (row.lane (0.f));
-        const auto moved = [&] (float b) { return std::abs (row.height (row.lane (b)) - startH) > 1e-5f; };
+        const float startH = row.height (valueAt (0));
+        const auto moved = [&] (float v) { return std::abs (row.height (v) - startH) > 1e-5f; };
         float leaves = 2.f;
         for (int k = 1; k <= kSteps && leaves > 1.f; ++k)
-            if (moved ((float) k / kSteps)) leaves = (float) (k - 1) / kSteps;
+            if (moved (valueAt (k))) leaves = (float) (k - 1) / kSteps;
 
         juce::Path whole, built, fill;
         const float restY = row.bipolar ? yFor (0.f) : top + span;
         for (int k = 0; k <= kSteps; ++k)
         {
-            const float b = (float) k / kSteps, x = xFor (b), y = yFor (row.lane (b));
+            const float x = xFor ((float) k / kSteps), y = yFor (valueAt (k));
             if (k == 0) whole.startNewSubPath (x, y);
             else whole.lineTo (x, y);
         }
         if (build > leaves)
         {
             const int from = (int) std::floor (leaves * kSteps);
-            const auto at = [&] (float b) { return juce::Point<float> (xFor (b), yFor (row.lane (b))); };
-            const auto first = at ((float) from / kSteps), last = at (build);
+            const auto at = [&] (int k) { return juce::Point<float> (xFor ((float) k / kSteps), yFor (valueAt (k))); };
+            const auto first = at (from), last = juce::Point<float> (playX, yFor (row.value (now)));
             built.startNewSubPath (first);
             fill.startNewSubPath (first.x, restY);
             fill.lineTo (first);
             for (int k = from + 1; k <= kSteps && (float) k / kSteps < build; ++k)
             {
-                built.lineTo (at ((float) k / kSteps));
-                fill.lineTo (at ((float) k / kSteps));
+                built.lineTo (at (k));
+                fill.lineTo (at (k));
             }
             built.lineTo (last);
             fill.lineTo (last);
@@ -139,9 +152,9 @@ void BuildTimeline::paint (juce::Graphics& g)
 
         // Name on the left, value at BUILD on the right.
         caption (g, row.label, { 0.f, lane.getY(), kLabelW - 8.f, laneH }, juce::Justification::centredLeft, col::inkSoft, 9.f);
-        g.setColour (moved (build) ? col::ink : col::inkFaint);
+        g.setColour (moved (row.value (now)) ? col::ink : col::inkFaint);
         g.setFont (mono (10.f));
-        g.drawText (row.text (row.lane (build)), juce::Rectangle<float> ((float) getWidth() - kValueW, lane.getY(), kValueW, laneH),
+        g.drawText (row.text (row.value (now)), juce::Rectangle<float> ((float) getWidth() - kValueW, lane.getY(), kValueW, laneH),
                     juce::Justification::centredRight, false);
     }
 

@@ -11,6 +11,13 @@
 //   rise     preset Full-On Rise at BUILD 70 %: low cut, noise, reverb, stereo locked
 //   squeeze  preset Squeeze at BUILD 90 %: both cuts and stereo locked, mono
 //   vacuum   preset Vacuum at BUILD 40 %: locked, nothing moving yet
+//   sunrise  preset Sunrise at BUILD 50 %: the lowpass it starts under, opening,
+//            its resonance driven
+//   pumping  preset Bottom Up at BUILD 30 %: the steep lowpass still low, the
+//            low cut waiting for the handover
+//   tail     preset Full-On Rise at BUILD 92 %: past the path, the level fading
+//            towards -20 dB (the reverb knob locked for the tail)
+//   downlift preset Downsweep at BUILD 25 %: the noise falling from the hit
 //   steps    rise, with the mouse on the preset's > key and the high cut's
 //            < key held down (it wraps to the last type); the low cut's keys dimmed
 //   bench    times the spectrum and whole-editor paints instead
@@ -133,7 +140,7 @@ int main (int argc, char** argv)
     for (int i = 2; i < argc; ++i)
         if (const juce::String a (argv[i]); a.startsWith ("--scale=")) scale = a.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
         else states.add (a);
-    if (states.isEmpty()) states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "steps" };
+    if (states.isEmpty()) states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps" };
 
     const double fs = 48000.0;
     const auto loop = testutil::psyLoop (fs, 60.0 / 145.0 * 8.0);   // two bars
@@ -155,6 +162,14 @@ int main (int argc, char** argv)
             k = { .preset = 9, .build = 90.f };
         else if (state == "vacuum")
             k = { .preset = 10, .build = 40.f };
+        else if (state == "sunrise")
+            k = { .preset = 11, .build = 50.f };
+        else if (state == "pumping")
+            k = { .preset = 14, .build = 30.f };
+        else if (state == "tail")
+            k = { .preset = 1, .build = 92.f };
+        else if (state == "downlift")
+            k = { .preset = 17, .build = 25.f };
 
         BuildAppProcessor proc;
         apply (proc, k);

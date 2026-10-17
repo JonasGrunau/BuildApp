@@ -13,23 +13,31 @@ using namespace testutil;
 namespace
 {
     // The loop through a chain whose BUILD follows buildAt (seconds), set
-    // once per block as the processor does.
-    Stereo run (const Stereo& x, const ba::Preset& p, const std::function<float (double)>& buildAt, double fs, int block = 480)
+    // once per block as the processor does; noise false keeps the noise off.
+    Stereo run (const Stereo& x, const ba::Preset& p, const std::function<float (double)>& buildAt, double fs, bool noise = true)
     {
+        constexpr int block = 480;
+        const auto at = [&] (double t) {
+            auto s = ba::applyPreset (p, buildAt (t), ba::Settings {});
+            if (! noise) s.noise = 0.f;
+            return s;
+        };
         ba::Buildup b;
-        const ba::Settings own;
-        b.set (ba::applyPreset (p, buildAt (0.0), own));
+        b.set (at (0.0));
         b.prepare (fs, block);
         Stereo y = x;
         for (size_t start = 0; start < y.size(); start += (size_t) block)
         {
-            b.set (ba::applyPreset (p, buildAt ((double) start / fs), own));
+            b.set (at ((double) start / fs));
             b.process (y.left.data() + start, y.right.data() + start, (int) std::min<size_t> ((size_t) block, y.size() - start));
         }
         return y;
     }
 
-    Stereo runAt (const Stereo& x, const ba::Preset& p, float build, double fs) { return run (x, p, [build] (double) { return build; }, fs); }
+    Stereo runAt (const Stereo& x, const ba::Preset& p, float build, double fs, bool noise = true)
+    {
+        return run (x, p, [build] (double) { return build; }, fs, noise);
+    }
 
     // Every lane with where its control rests (NaN: no rest position, the
     // control only matters once another one is up) and its range.
@@ -52,22 +60,28 @@ namespace
     }
 } // namespace
 
-TEST_CASE ("Presets: at BUILD 0 every preset passes the loop bit for bit", "[presets]")
+TEST_CASE ("Presets: at BUILD 0 every preset that rests there passes the loop bit for bit", "[presets]")
 {
+    // The others start at a setting of their own: Sunrise and the Pumping Up
+    // presets under a closed lowpass, Downsweep and Freefall at the hit.
     const double fs = GENERATE (44100.0, 48000.0, 96000.0);
     const auto x = psyLoop (fs, 1.0);
+    int resting = 0;
     for (const auto& p : ba::kPresets)
     {
+        if (! ba::restsAtZero (p)) continue;
         INFO (p.name << " at " << fs);
+        ++resting;
         const auto y = runAt (x, p, 0.f, fs);
         CHECK (x.left == y.left);
         CHECK (x.right == y.right);
     }
+    CHECK (resting == 13);
 }
 
-TEST_CASE ("Presets: lanes start at rest, stay in range, and only drive what they say", "[presets]")
+TEST_CASE ("Presets: lanes stay in range and only drive what they say", "[presets]")
 {
-    CHECK (std::size (ba::kPresets) == 10);
+    CHECK (std::size (ba::kPresets) == 19);
     for (const auto& p : ba::kPresets)
     {
         INFO (p.name);
@@ -84,7 +98,7 @@ TEST_CASE ("Presets: lanes start at rest, stay in range, and only drive what the
             INFO (l.name);
             ++driven;
             const auto keys = l.lane.points();
-            if (! std::isnan (l.rest)) CHECK (l.lane (0.f) == l.rest);
+            if (ba::restsAtZero (p) && ! std::isnan (l.rest)) CHECK (l.lane (0.f) == l.rest);
             for (size_t i = 0; i < keys.size(); ++i)
             {
                 CHECK (keys[i].at >= 0.f);
@@ -145,10 +159,126 @@ TEST_CASE ("Presets: lanes hold outside their keys, bend with their curve, and s
     CHECK (stairs (1.f) == 12.f);
 }
 
+TEST_CASE ("Presets: progressive builds keep the groove and open the lowpass", "[presets]")
+{
+    // Until the last bar of a 16-bar build the low cut stays under 400 Hz, so
+    // the rolling bass is thinned, not gone; a high cut that drops in only
+    // opens from there on.
+    int progressive = 0;
+    for (const auto& p : ba::kPresets)
+    {
+        if (std::string (p.section) != "Progressive") continue;
+        INFO (p.name);
+        ++progressive;
+        for (int i = 0; i <= 90; ++i)
+            CHECK (p.lowCut ((float) i / 100.f) <= 0.5f);
+        if (! p.highCut.driven()) continue;
+        for (int i = 0; i < 100; ++i)
+            CHECK (p.highCut ((float) (i + 1) / 100.f) >= p.highCut ((float) i / 100.f));
+    }
+    CHECK (progressive == 3);
+}
+
+TEST_CASE ("Presets: the Pumping Up presets open a lowpass and hand it over to the low cut", "[presets]")
+{
+    // The groove pumps up from the bottom: at 0 % the high cut is under
+    // 400 Hz, it only opens from there, and it lets go before the top. The low cut takes over without a squeeze (it
+    // is still under 50 Hz when the high cut lets go) and without a stall
+    // (from a quarter of BUILD on, one of the cuts moves in every 32nd).
+    int open = 0;
+    for (const auto& p : ba::kPresets)
+    {
+        if (std::string (p.section) != "Pumping Up") continue;
+        INFO (p.name);
+        ++open;
+        REQUIRE (p.highCut.driven());
+        REQUIRE (p.lowCut.driven());
+        CHECK (p.highCut (0.f) <= ba::map::highCutNorm (400.0));
+        CHECK (! ba::restsAtZero (p));
+        float off = 1.f;
+        for (int i = 1; i <= 1000; ++i)
+        {
+            const float b = (float) i / 1000.f;
+            CHECK (p.highCut (b) >= p.highCut (b - 0.001f));
+            if (ba::map::highCutOff (p.highCut (b))) off = std::min (off, b);
+        }
+        CHECK (off < 1.f);
+        CHECK (p.lowCut (off) <= ba::map::lowCutNorm (50.0));
+        CHECK (p.lowCut (1.f) >= ba::map::lowCutNorm (200.0));
+        for (int i = 8; i < 32; ++i)
+        {
+            const float a = (float) i / 32.f, b = (float) (i + 1) / 32.f;
+            INFO ("BUILD " << a);
+            CHECK (std::abs (p.highCut (b) - p.highCut (a)) + std::abs (p.lowCut (b) - p.lowCut (a)) > 0.01f);
+        }
+    }
+    CHECK (open == 3);
+}
+
+TEST_CASE ("Presets: past the path every preset fades towards its reverb tail", "[presets]")
+{
+    // Up to kPathEnd BUILD plays the preset's path as designed. Then only the
+    // reverb moves (up, for the tail), and once it is there the level goes
+    // evenly in dB from the preset's gain down to kFadeToDb.
+    const auto near = [] (float a, float b) { return std::abs (a - b) < 1e-4f * std::max (1.f, std::abs (b)); };
+    for (const auto& p : ba::kPresets)
+    {
+        INFO (p.name);
+        ba::Settings own;
+        own.reverb = 0.1f;
+        for (int i = 0; i <= 40; ++i)
+        {
+            const float along = (float) i / 40.f;
+            const auto s = ba::applyPreset (p, along * ba::kPathEnd, own);
+            CHECK (s.fadeDb == 0.f);
+            if (p.lowCut.driven()) CHECK (near (s.lowCut, p.lowCut (along)));
+            if (p.highCut.driven()) CHECK (near (s.highCut, p.highCut (along)));
+            CHECK (near (s.reverb, p.reverb.driven() ? p.reverb (along) : own.reverb));
+            if (p.gain.driven()) CHECK (near (s.makeupDb, p.gain (along)));
+        }
+
+        const auto end = ba::applyPreset (p, ba::kPathEnd, own), from = ba::applyPreset (p, ba::kFadeFrom, own);
+        CHECK (from.reverb >= std::max (end.reverb, ba::kTailReverb));
+        CHECK (from.fadeDb == 0.f);
+        const float level = from.makeupDb;
+        for (int i = 0; i <= 20; ++i)
+        {
+            const float down = (float) i / 20.f;
+            const auto s = ba::applyPreset (p, ba::kFadeFrom + (1.f - ba::kFadeFrom) * down, own);
+            INFO ("fade " << down);
+            CHECK (near (s.makeupDb + s.fadeDb, level + (ba::kFadeToDb - level) * down));   // a straight line in dB
+            CHECK (s.lowCut == from.lowCut);
+            CHECK (s.highCut == from.highCut);
+            CHECK (s.pitch == from.pitch);
+            CHECK (s.noise == from.noise);
+            CHECK (s.reverb == from.reverb);
+            CHECK (s.stereo == from.stereo);
+        }
+        CHECK (ba::drives (p, ba::Control::reverb, 1.f));
+    }
+
+    // Held at the top, the chain puts out exactly what it does where the fade
+    // starts, that much quieter: the fade sits before the reverb, so the
+    // tail follows the music down.
+    const double fs = 48000.0;
+    const auto x = psyLoop (fs, 4.0);
+    const size_t after = (size_t) (2.0 * fs);
+    for (const auto& p : ba::kPresets)
+    {
+        INFO (p.name);
+        const auto from = ba::applyPreset (p, ba::kFadeFrom, ba::Settings {}), top = ba::applyPreset (p, 1.f, ba::Settings {});
+        const double lu = loudness (runAt (x, p, 1.f, fs), fs, after, x.size()) - loudness (runAt (x, p, ba::kFadeFrom, fs), fs, after, x.size());
+        INFO (lu << " LU from the fade's start to the top, " << top.fadeDb << " dB of fade");
+        CHECK (std::abs (lu - (double) top.fadeDb) < 0.3);
+        CHECK (near (from.makeupDb + top.fadeDb, ba::kFadeToDb));
+    }
+}
+
 TEST_CASE ("Presets: the drop (BUILD back to 0) gives the loop back bit for bit", "[presets]")
 {
     // Four seconds of build to the top, then BUILD straight to 0: within half
-    // a second every stage has faded out and the output is the input.
+    // a second every stage has faded out and the output is the input (for a
+    // preset that rests at 0; the others are back at their 0 % setting).
     const double fs = 48000.0;
     const auto x = psyLoop (fs, 5.5);
     for (const auto& p : ba::kPresets)
@@ -158,6 +288,7 @@ TEST_CASE ("Presets: the drop (BUILD back to 0) gives the loop back bit for bit"
         bool finite = true;
         for (float v : y.left) finite = finite && std::isfinite (v);
         CHECK (finite);
+        if (! ba::restsAtZero (p)) continue;
         const auto settled = (long) (4.5 * fs);
         CHECK (std::equal (y.left.begin() + settled, y.left.end(), x.left.begin() + settled));
         CHECK (std::equal (y.right.begin() + settled, y.right.end(), x.right.begin() + settled));
@@ -166,10 +297,11 @@ TEST_CASE ("Presets: the drop (BUILD back to 0) gives the loop back bit for bit"
 
 TEST_CASE ("Presets: loudness holds through the build, and the peaks stay sane", "[presets][level]")
 {
-    // BUILD held at each quarter, measured after the reverb has built up.
+    // BUILD held at each quarter of the path, measured after the reverb has
+    // built up.
     // The window comes from the measured spread (buildapp_render: worst
-    // -5.2 LU in Squeeze, +1.3 LU in White-Out; held here, -5.1 and +1.3)
-    // plus margin. The test loop
+    // -5.2 LU in Squeeze, +1.3 LU in White-Out; held here, -5.9 in Inhale's
+    // breath and +1.9 in Sink) plus margin. The test loop
     // is kick and bass heavy, so a cut taking the lows away costs more here
     // than on a full mix: the gain lanes only make up part of it on purpose.
     const double fs = 48000.0;
@@ -177,8 +309,9 @@ TEST_CASE ("Presets: loudness holds through the build, and the peaks stay sane",
     const size_t from = (size_t) (2.0 * fs);
     const double dry = loudness (x, fs, from, x.size());
     for (const auto& p : ba::kPresets)
-        for (const float build : { 0.25f, 0.5f, 0.75f, 1.f })
+        for (const float along : { 0.f, 0.25f, 0.5f, 0.75f, 1.f })
         {
+            const float build = along * ba::kPathEnd;   // the path; past it the music fades on purpose
             const auto y = runAt (x, p, build, fs);
             const double lu = loudness (y, fs, from, y.size()) - dry;
             double peak = 0.0;
@@ -190,14 +323,41 @@ TEST_CASE ("Presets: loudness holds through the build, and the peaks stay sane",
         }
 }
 
+TEST_CASE ("Presets: the noise stays under the music", "[presets][level]")
+{
+    // A riser sits under the build, not on top of it. BUILD held at 0, a
+    // half, three quarters and the end of the path (a downlifter's hit is
+    // at 0): the noise alone (a silent input) against
+    // the music alone (the noise off), both through the chain. Measured: at
+    // most -9.3, -2.2 and -0.1 LU, in White-Out, where the noise is the
+    // point (and at the top in Vacuum's slam); Full-On Rise was at about -4,
+    // +4 and +9 before its noise came down.
+    const double fs = 48000.0;
+    const auto x = psyLoop (fs, 4.0);
+    const Stereo silence { Signal (x.size(), 0.f), Signal (x.size(), 0.f) };
+    const size_t from = (size_t) (2.0 * fs);
+    for (const auto& p : ba::kPresets)
+    {
+        if (! p.noise.driven()) continue;
+        for (const auto& [along, most] : { std::pair { 0.f, -6.0 }, { 0.5f, -6.0 }, { 0.75f, -1.5 }, { 1.f, 1.0 } })
+        {
+            const float build = along * ba::kPathEnd;
+            const double lu = loudness (runAt (silence, p, build, fs), fs, from, x.size())
+                              - loudness (runAt (x, p, build, fs, false), fs, from, x.size());
+            INFO (p.name << " at BUILD " << build << ": noise " << lu << " LU re the music");
+            CHECK (lu < most);
+        }
+    }
+}
+
 TEST_CASE ("Presets: no two presets take the same path", "[presets]")
 {
     // Where each preset has the chain over the build, as positions along the
     // knobs' travel (pitch over the octave, gain over 12 dB), with the noise
     // pitch and low cut counted only as loud as the noise is. Two presets
     // must differ by at least half of a knob's travel on average, summed
-    // over the controls (the closest pair, Full-On Rise and Rocket, measured
-    // 0.72).
+    // over the controls (the closest pair, Acid Scream and Sunrise, measured
+    // 0.58).
     const auto path = [] (const ba::Preset& p) {
         std::vector<std::array<float, 9>> out;
         for (int i = 1; i <= 20; ++i)

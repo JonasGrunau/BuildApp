@@ -31,6 +31,7 @@ struct Settings
     float levelDb = 0.f;
     float mix = 1.f;          // dry/wet, 0..1
     float makeupDb = 0.f;     // gain on the wet signal; only presets set it (Presets.h)
+    float fadeDb = 0.f;       // gain before the reverb (<= 0): the fade into the tail; only presets set it
     bool highQuality = false; // the cuts' high quality mode (offline renders)
 
     CutKnobs lowCutKnobs() const noexcept { return { lowCut, lowCutType, lowCutReso, lowCutAuto }; }
@@ -39,9 +40,9 @@ struct Settings
 
 // The whole effect, stereo, in place:
 //
-//   in ─┬─ pitch ─ low cut ─ high cut ─ + noise ─ reverb ─ stereo ─ makeup ─┐ wet
-//       └───────────────────────────────────────────────────────────────────┤ dry
-//                                                           dry/wet ─ level ─ out
+//   in ─┬─ pitch ─ low cut ─ high cut ─ + noise ─ fade ─ reverb ─ stereo ─ makeup ─┐ wet
+//       └──────────────────────────────────────────────────────────────────────────┤ dry
+//                                                                  dry/wet ─ level ─ out
 //
 // With every knob at its default the signal passes bit for bit: each stage
 // at rest is skipped, not run at unity.
@@ -66,7 +67,7 @@ private:
     CutFilters filters;
     NoiseSource noise;
     Reverb reverb;
-    dsp::Smoother width, mix, gain, makeup;
+    dsp::Smoother width, mix, gain, makeup, fader;
     std::vector<float> dryL, dryR;
 };
 

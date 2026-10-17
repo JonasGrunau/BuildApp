@@ -14,7 +14,7 @@ void Buildup::prepare (double sampleRate, int maxBlockSize)
     filters.prepare (fs);
     noise.prepare (fs);
     reverb.prepare (fs);
-    for (auto* s : { &width, &mix, &gain, &makeup })
+    for (auto* s : { &width, &mix, &gain, &makeup, &fader })
     {
         s->prepare (fs, 0.02);
         s->snap (s->getTarget());
@@ -43,6 +43,7 @@ void Buildup::set (const Settings& s) noexcept
     mix.setTarget (std::clamp ((double) s.mix, 0.0, 1.0));
     gain.setTarget (map::dbToGain (std::clamp ((double) s.levelDb, map::kLevelMin, map::kLevelMax)));
     makeup.setTarget (map::dbToGain (std::clamp ((double) s.makeupDb, -24.0, 24.0)));
+    fader.setTarget (map::dbToGain (std::min (0.0, (double) s.fadeDb)));
 }
 
 void Buildup::process (float* left, float* right, int n) noexcept
@@ -64,6 +65,17 @@ void Buildup::processChunk (float* left, float* right, int n) noexcept
     pitch.process (left, right, n);
     filters.process (left, right, n);
     noise.process (left, right, n);
+
+    // The fade sits before the reverb: faded out, the music is gone and its
+    // tail rings on.
+    if (! (fader.settled() && fader.get() == 1.0))
+        for (int i = 0; i < n; ++i)
+        {
+            const double g = fader.next();
+            left[i] = (float) (left[i] * g);
+            right[i] = (float) (right[i] * g);
+        }
+
     reverb.process (left, right, n);
 
     if (! (width.settled() && width.get() == 1.0))
