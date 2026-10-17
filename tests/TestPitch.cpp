@@ -37,6 +37,40 @@ TEST_CASE ("Pitch: 0 semitones passes the signal bit for bit, with no delay", "[
     }
 }
 
+TEST_CASE ("Pitch: engaging from rest spreads its work over the blocks, and fades in cleanly", "[pitch][click]")
+{
+    // Waking up must not run a delay's worth of windows inside one block
+    // (an xrun at small buffers): no block runs more windows than its
+    // length's worth of hops, plus one.
+    const double fs = GENERATE (48000.0, 96000.0);
+    const auto x = sine (220.0, fs, (size_t) (1.5 * fs), 0.5);
+    ba::PitchShifter p;
+    p.prepare (fs);
+    Stereo y { x, x };
+    const int block = 64;
+    int64_t most = 0;
+    for (size_t start = 0, k = 0; start < y.size(); start += block, ++k)
+    {
+        if (start >= (size_t) (0.5 * fs)) p.setSemitones (7.f);
+        const int64_t before = p.windows();
+        p.process (y.left.data() + start, y.right.data() + start, (int) std::min<size_t> (block, y.size() - start));
+        most = std::max (most, p.windows() - before);
+    }
+    const int64_t hop = p.delay() / 8;   // the delay is 2 tails, a hop a quarter tail
+    INFO ("fs " << fs << ": at most " << most << " windows in a " << block << "-sample block (hop " << hop << ")");
+    CHECK (most <= block / hop + 1);
+
+    // Dry, then the fade to the shifted sine: no step anywhere (a sine at
+    // 220 Hz or 330 Hz moves at most 0.5 * 2 pi * 330 / fs per sample).
+    double jump = 0.0;
+    for (size_t i = 1; i < y.size(); ++i) jump = std::max (jump, (double) std::abs (y.left[i] - y.left[i - 1]));
+    const double steepest = 0.5 * 2.0 * pi * 220.0 * std::pow (2.0, 7.0 / 12.0) / fs;
+    INFO ("largest step " << jump << ", the shifted sine's steepest " << steepest);
+    CHECK (jump < 1.25 * steepest);
+    const double want = 220.0 * std::pow (2.0, 7.0 / 12.0);
+    CHECK (std::abs (dominantHz (y.left, fs, 200.0, 500.0, (size_t) (0.8 * fs)) / want - 1.0) < 0.003);
+}
+
 TEST_CASE ("Pitch: lands on the interval", "[pitch]")
 {
     const double fs = GENERATE (44100.0, 48000.0, 96000.0);

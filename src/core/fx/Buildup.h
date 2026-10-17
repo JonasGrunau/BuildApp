@@ -51,7 +51,7 @@ public:
     Buildup() { set (Settings {}); }
 
     void prepare (double sampleRate, int maxBlockSize);
-    void reset();
+    void reset();   // forgets the signal (tails, history); the knobs stay where they are
 
     void set (const Settings& s) noexcept;
     void process (float* left, float* right, int numSamples) noexcept;

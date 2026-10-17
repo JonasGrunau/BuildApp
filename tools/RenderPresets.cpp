@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <string>
 
 using namespace testutil;
@@ -87,14 +88,29 @@ int main (int argc, char** argv)
 {
     const std::string dir = argc > 1 ? argv[1] : ".";
     std::vector<int> pick;
-    for (int i = 2; i < argc; ++i) pick.push_back (std::atoi (argv[i]) - 1);
+    for (int i = 2; i < argc; ++i)
+    {
+        const int n = std::atoi (argv[i]);
+        if (n < 1 || n > (int) std::size (ba::kPresets))
+        {
+            std::fprintf (stderr, "No preset %s (1 to %d)\n", argv[i], (int) std::size (ba::kPresets));
+            return 1;
+        }
+        pick.push_back (n - 1);
+    }
     if (pick.empty())
         for (int i = 0; i < (int) std::size (ba::kPresets); ++i) pick.push_back (i);
+
+    std::error_code made;
+    std::filesystem::create_directories (dir, made);
+    const auto save = [] (const std::string& path, const Stereo& s) {
+        if (! writeWav (path.c_str(), s, kFs)) std::fprintf (stderr, "Could not write %s\n", path.c_str());
+    };
 
     const int bars = kBuildBars + kDropBars;
     const auto barLen = (size_t) (kBar * kFs);
     const auto loop = psyLoop (kFs, bars * kBar);
-    writeWav ((dir + "/00-dry.wav").c_str(), loop, kFs);
+    save (dir + "/00-dry.wav", loop);
     std::vector<double> dryLu, dryHz;
     for (int bar = 0; bar < bars; ++bar)
     {
@@ -114,7 +130,7 @@ int main (int argc, char** argv)
         const auto y = render (loop, &p);
         char name[256];
         std::snprintf (name, sizeof (name), "%s/%02d-%s.wav", dir.c_str(), i + 1, p.name);
-        writeWav (name, y, kFs);
+        save (name, y);
 
         std::printf ("\n%02d %s\n", i + 1, p.name);
         const auto row = [&] (const char* label, auto value) {

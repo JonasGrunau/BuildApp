@@ -7,7 +7,7 @@
 
 class BuildAppProcessor;
 
-// Section A. The live spectrum of the input (a faint line) and the output
+// Section B. The live spectrum of the input (a faint line) and the output
 // (filled), with the cut filters' exact response in the signal colour on its
 // own scale (0 dB near the top) and what it removes hatched, and the noise
 // band dotted where it sits. The two cut markers can be dragged sideways;

@@ -35,8 +35,10 @@ namespace ba
 // buys its quality with an analysis window twice as long.
 //
 // At 0 semitones the stage passes the signal untouched, with no delay. It
-// fades to the shifted signal (and back) over 25 ms, waking up with the
-// window already run over the recent input, so there is no cold start.
+// fades to the shifted signal (and back) over 25 ms. Waking up, it runs its
+// windows on schedule from there over the recent input and starts the fade
+// one delay later, once the shifted signal is whole: no cold start, and no
+// burst of windows in one block.
 class PitchShifter
 {
 public:
@@ -49,6 +51,7 @@ public:
 
     bool isBypassed() const noexcept { return engage.isOff(); }
     int delay() const noexcept { return lag; }   // how late the shifted signal runs, in samples
+    int64_t windows() const noexcept { return synthesised; }   // windows synthesised so far (the work, for the tests)
 
 private:
     struct Shape
@@ -63,7 +66,10 @@ private:
     void use (const Shape&) noexcept;
     void frame (int64_t end, bool synthesise) noexcept;   // the window that ends at input sample `end`
     void shift (int channel, bool hit) noexcept;   // spec -> out for one channel, at `ratio`
-    void wake() noexcept;
+    int64_t gridFrom (int64_t t) const noexcept;
+    void restart (int64_t firstEnd) noexcept;
+    void start (int64_t now) noexcept;
+    void wake (int64_t now) noexcept;
 
     double fs = 48000.0;
     int tail = 384, lag = 768;
@@ -88,7 +94,7 @@ private:
     // overlap-add accumulator, indexed by absolute input sample.
     std::array<std::vector<float>, 2> input, real, imag, acc;
     int inMask = 0, accMask = 0;
-    int64_t written = 0;
+    int64_t written = 0, synthesised = 0;
 
     // Per channel and bin: last frame's spectrum and the rotation of the peak
     // region the bin belonged to.
@@ -102,7 +108,8 @@ private:
 
     dsp::Smoother semis;
     dsp::Fade engage;
-    bool running = false;
+    int64_t fadeFrom = 0;   // the input sample from which the shifted output is whole
+    bool running = false, rewake = false;
 };
 
 } // namespace ba

@@ -181,6 +181,42 @@ TEST_CASE ("Chain: reverb tail follows the knob, and the drop cuts it", "[chain]
     CHECK (std::equal (y.left.begin() + (long) settled, y.left.end(), x.left.begin() + (long) settled));
 }
 
+TEST_CASE ("Chain: a reset forgets the tail, and a render after prepare repeats exactly", "[chain]")
+{
+    const double fs = 48000.0;
+    const auto x = psyLoop (fs, 1.0);
+
+    // The host stops or jumps: what comes after doesn't carry the reverb
+    // tail or the pitch history from before.
+    ba::Settings s;
+    s.reverb = 1.f;
+    s.pitch = 7.f;
+    ba::Buildup b;
+    b.set (s);
+    b.prepare (fs, 480);
+    Stereo y = x;
+    b.process (y.left.data(), y.right.data(), (int) y.size());
+    b.reset();
+    Stereo silence { Signal ((size_t) fs, 0.f), Signal ((size_t) fs, 0.f) };
+    b.process (silence.left.data(), silence.right.data(), (int) silence.size());
+    CHECK (rms (silence.left) == 0.0);
+    CHECK (rms (silence.right) == 0.0);
+
+    // Everything on, the noise included: prepared again, the same input
+    // renders to the same output.
+    b.set (everything());
+    const auto render = [&] {
+        b.prepare (fs, 480);
+        Stereo out = x;
+        for (size_t start = 0; start < out.size(); start += 480)
+            b.process (out.left.data() + start, out.right.data() + start, (int) std::min<size_t> (480, out.size() - start));
+        return out;
+    };
+    const auto first = render(), second = render();
+    CHECK (first.left == second.left);
+    CHECK (first.right == second.right);
+}
+
 TEST_CASE ("Chain: everything at full stays finite and bounded at any rate", "[chain]")
 {
     const double fs = GENERATE (44100.0, 48000.0, 96000.0, 192000.0);

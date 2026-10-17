@@ -41,8 +41,10 @@ public:
 private:
     static double compensation (double centreHz, double fs) noexcept;
 
+    static constexpr std::array<uint32_t, 2> kSeeds { 0x9e3779b9u, 0x7f4a7c15u };   // reset starts them over: renders repeat
+
     double fs = 48000.0;
-    std::array<uint32_t, 2> seed { 0x9e3779b9u, 0x7f4a7c15u };
+    std::array<uint32_t, 2> seed = kSeeds;
     std::array<dsp::SvfState, 2> lowpass, highpass;
     std::array<std::array<dsp::SvfState, 2>, 2> cutState;   // [channel][stage]
     dsp::SvfCoeffs lpCoeffs, hpCoeffs, cut1, cut2;

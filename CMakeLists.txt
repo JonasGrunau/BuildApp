@@ -10,7 +10,7 @@ if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
 endif()
 
 # Release builds pass the tag's version, e.g. -DBUILDAPP_VERSION=1.2.0.
-set(BUILDAPP_VERSION "0.2.0" CACHE STRING "Plugin version, MAJOR.MINOR.PATCH")
+set(BUILDAPP_VERSION "0.2.1" CACHE STRING "Plugin version, MAJOR.MINOR.PATCH")
 project(BuildApp VERSION ${BUILDAPP_VERSION} LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -59,10 +59,8 @@ if(BUILDAPP_BUILD_PLUGIN)
     FetchContent_MakeAvailable(JUCE)
 
     juce_add_binary_data(buildapp_assets SOURCES
-        resources/fonts/IBMPlexSansCondensed-Medium.ttf
         resources/fonts/IBMPlexSansCondensed-SemiBold.ttf
-        resources/fonts/IBMPlexMono-Regular.ttf
-        resources/fonts/IBMPlexMono-Medium.ttf)
+        resources/fonts/IBMPlexMono-Regular.ttf)
 
     juce_add_plugin(BuildApp
         COMPANY_NAME "Jonas Grunau"

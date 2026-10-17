@@ -25,10 +25,8 @@ namespace theme
 
     // IBM Plex Sans Condensed for labels, IBM Plex Mono for numbers.
     juce::Font label (float height = 10.f);        // uppercase captions, tracked
-    juce::Font text (float height = 12.f);
     juce::Font title (float height = 22.f);
     juce::Font mono (float height = 11.f);
-    juce::Font monoStrong (float height = 11.f);
 
     // Uppercase caption with tracking.
     void caption (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> area,

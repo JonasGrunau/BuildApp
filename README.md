@@ -109,7 +109,9 @@ resonance the core really runs at; Clean is the linear core. The types in the
 menus pair a style with a slope, a drive and an auto-resonance curve.
 The cutoff glides per sample in log frequency (20 ms) and the resonance after
 it (30 ms); changing type crossfades from the old filter to the new one,
-which starts from the old one's state. Live the filters run at the host rate
+which starts from the old one's state, and a change that comes during a
+crossfade follows once it is done, so stepping through the types quickly (or
+automating them) never jumps. Live the filters run at the host rate
 like Volcano's; offline renders run them 4× oversampled (2× at 88.2/96 kHz)
 through polyphase IIR halfbands, which cuts their aliasing by 15 dB and more
 (Volcano's own "High Quality" only oversamples the clipper and measures within
@@ -130,6 +132,10 @@ The analysis window is 4096 points but asymmetric, with an 8 ms tail and a
 synthesis window on that tail only (Mauler & Martin), so the shifted signal
 runs 16 ms late. Only while the pitch is up: at 0 semitones the stage passes
 the signal untouched with no delay, and it fades in and out over 25 ms.
+Waking up, it runs its frames on schedule over the recent input and starts
+the fade 16 ms later, once the shifted signal is whole: no cold start, and no
+burst of frames in one audio block (which at small buffer sizes would drop
+out just as a preset's pitch lane leaves 0).
 Offline renders use an analysis window twice as long at the same 16 ms, so a
 bounce lines up with what was heard. On an eight-note chord the artifacts sit
 15–17 dB (live) and 17–21 dB (export) under the shifted notes; the old
@@ -150,7 +156,13 @@ high shelf in the loop so the highs die first. The overall level stays within
 about 1.5 dB from 0 to 100 % while the wash rises to ~6 dB above what is sent
 into it.
 
-The whole chain with everything on uses about 1 % of one core at 48 kHz.
+When the host stops or jumps in the timeline (it resets the plug-in), the
+reverb tail and the pitch history are cleared, so nothing from before the
+jump rings into what follows. With the same input, an offline render repeats
+exactly, noise included.
+
+The whole chain uses about 1 % of one core at 48 kHz with the pitch at 0, and
+about 8 % with everything on (the phase vocoder is the rest; Apple M4 Pro).
 
 ## Building
 

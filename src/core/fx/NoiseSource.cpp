@@ -65,6 +65,7 @@ void NoiseSource::prepare (double sampleRate)
 
 void NoiseSource::reset()
 {
+    seed = kSeeds;
     for (auto& s : lowpass) s.reset();
     for (auto& s : highpass) s.reset();
     for (auto& ch : cutState)

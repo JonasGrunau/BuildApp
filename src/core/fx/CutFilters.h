@@ -32,7 +32,8 @@ struct CutKnobs
 // after it (30 ms), and in auto mode follows the gliding cutoff, so it moves
 // with the sweep sample by sample. Changing a cut's type
 // crossfades from the old filter to the new one (30 ms), the new one
-// starting from the old one's state. A filter at its "off" end stop fades
+// starting from the old one's state; a change that comes while a crossfade
+// runs follows once it is done. A filter at its "off" end stop fades
 // out and stops running; with both off the stage is not processed at all
 // and the signal passes bit for bit, at either quality.
 class CutFilters
@@ -76,12 +77,13 @@ private:
 
     private:
         double resonanceAt (double hz) noexcept;   // the resonance target at this (gliding) cutoff
+        void changeType() noexcept;                // starts the crossfade to `wanted`, unless one runs
 
         bool lowpass;
         CharacterFilter now, before;
         dsp::Smoother log2Hz, peak;
         dsp::Fade fade, change;
-        int type = 0;
+        int type = 0, wanted = 0;   // the type running, and the one asked for
         double manual = 0.3, autoAt = -1.0, autoValue = 0.0;
         bool autoReso = true, cold = true;
     };
@@ -105,6 +107,7 @@ private:
     static constexpr int kHistory = 512;   // the latest input, to settle the halfbands on waking
     std::array<std::array<float, kHistory>, 2> history {};
     int historyPos = 0;
+    bool resting = true;   // the path is idle; it settles when it wakes
 };
 
 } // namespace ba

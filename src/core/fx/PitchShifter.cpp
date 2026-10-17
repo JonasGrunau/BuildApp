@@ -172,8 +172,8 @@ void PitchShifter::reset()
         for (auto& b : *rings) std::fill (b.begin(), b.end(), 0.f);
     for (auto& q : quadrature) q.reset();
     for (auto& b : acc) std::fill (b.begin(), b.end(), 0.f);
-    written = 0;
-    running = false;
+    written = fadeFrom = 0;
+    running = rewake = false;
 }
 
 void PitchShifter::setSemitones (float st) noexcept
@@ -183,10 +183,17 @@ void PitchShifter::setSemitones (float st) noexcept
     engage.setOn (s > 0.001);
 }
 
-// The stage starts (or changes window) mid-stream: clear the analysis state
-// and run the frames that the coming output needs over the input it already
-// has, so the first shifted sample is as good as any later one.
-void PitchShifter::wake() noexcept
+// The first frame end on the hop grid at or after input sample t.
+int64_t PitchShifter::gridFrom (int64_t t) const noexcept
+{
+    const int64_t hop = shape->hop;
+    return t + (hop - 1 - (t % hop) + hop) % hop;
+}
+
+// Clears the analysis state for frames ending at `firstEnd` on, and
+// analyses the frame before it, so the first one knows its partials' phase
+// advance.
+void PitchShifter::restart (int64_t firstEnd) noexcept
 {
     for (auto& b : acc) std::fill (b.begin(), b.end(), 0.f);
     for (int c = 0; c < 2; ++c)
@@ -196,13 +203,34 @@ void PitchShifter::wake() noexcept
     }
     lastHf = 0.0;
     sinceHit = 0;
-    const int64_t now = written - 1, hop = shape->hop;
-    int64_t first = now - lag;
-    first += (hop - 1 - (first % hop) + hop) % hop;   // the first frame end on the hop grid
-    frame (first - hop, false);
-    for (int64_t e = first; e <= now; e += hop)
-        frame (e, true);
+    frame (firstEnd - shape->hop, false);
     running = true;
+}
+
+// Waking from rest at input sample `now`: the frames run on their schedule
+// from here, and the fade waits until the output they make is whole, one
+// delay later. Nothing runs ahead, so no block carries more than its share.
+void PitchShifter::start (int64_t now) noexcept
+{
+    restart (gridFrom (now));
+    fadeFrom = now + lag;
+    if ((now + 1) % shape->hop == 0) frame (now, true);
+}
+
+// The output is sounding already (after a reset, or the window changed):
+// run at once the frames the output from `now - lag` on needs, over the
+// input there is, so the next shifted sample is as good as any later one.
+void PitchShifter::wake (int64_t now) noexcept
+{
+    const int64_t first = gridFrom (now - lag);
+    restart (first);
+    for (int64_t e = first; e <= now; e += shape->hop)
+        frame (e, true);
+    // The first of them also wrote into samples already played: forget
+    // those, or they come round again one ring later.
+    for (int64_t k = first - lag + 1; k < now - lag; ++k)
+        for (auto& b : acc) b[(size_t) (k & accMask)] = 0.f;
+    fadeFrom = now;
 }
 
 void PitchShifter::process (float* left, float* right, int n) noexcept
@@ -210,7 +238,7 @@ void PitchShifter::process (float* left, float* right, int n) noexcept
     if (const Shape& want = wantHigh ? high : live; &want != shape)
     {
         use (want);
-        if (running) wake();
+        rewake = running;
     }
 
     for (int i = 0; i < n; ++i)
@@ -228,10 +256,14 @@ void PitchShifter::process (float* left, float* right, int n) noexcept
         if (! running)
         {
             if (! engage.isTargetOn()) continue;   // at rest: untouched, no delay
-            wake();
+            if (engage.get() > 0.0) wake (now);
+            else start (now);
         }
+        else if (rewake)
+            wake (now);
         else if ((now + 1) % shape->hop == 0)
             frame (now, true);
+        rewake = false;
 
         // The shifted signal runs `lag` behind; that sample is complete now.
         float y[2];
@@ -240,6 +272,12 @@ void PitchShifter::process (float* left, float* right, int n) noexcept
             auto& a = acc[(size_t) c][(size_t) ((now - lag) & accMask)];
             y[c] = a;
             a = 0.f;
+        }
+        if (now < fadeFrom)
+        {
+            // Warming up: the shifted signal isn't whole yet; the input passes.
+            if (! engage.isTargetOn()) running = false;
+            continue;
         }
         const double e = engage.next();
         left[i] = (float) (x[0] + e * (y[0] - x[0]));
@@ -287,6 +325,7 @@ void PitchShifter::frame (int64_t end, bool synthesise) noexcept
     for (int c = 0; c < 2; ++c)
         shift (c, sinceHit <= kHitHold);
     if (! synthesise) return;
+    ++synthesised;
 
     // Only the real parts of the two analytic outputs are wanted, so both go
     // back through one transform, each made symmetric (halved, mirrored); DC

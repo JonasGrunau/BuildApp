@@ -35,8 +35,10 @@ namespace ids
 // cut types are choices from ba::kLowCutCharacters and ba::kHighCutCharacters.
 // PRESET picks one of ba::kPresets (or Off); BUILD then drives the controls
 // that preset takes over, and the knobs' own values wait underneath until
-// the preset is switched off. Offline renders run the cuts in high quality.
-// Input and output are tapped (mono) for the editor's spectrum.
+// the preset is switched off. Offline renders run the cuts and the pitch in
+// high quality. A host reset (transport stop or jump) clears the reverb tail
+// and the pitch history. Input and output are tapped (mono) for the editor's
+// spectrum.
 class BuildAppProcessor : public juce::AudioProcessor
 {
 public:
@@ -45,6 +47,7 @@ public:
     // ---- AudioProcessor -------------------------------------------------------
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
+    void reset() override { chain.reset(); }   // the host stopped or jumped: tails and history go
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using juce::AudioProcessor::processBlock;

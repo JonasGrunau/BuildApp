@@ -66,7 +66,7 @@ juce::Font NightLookAndFeel::getPopupMenuFont() { return mono (11.f); }
 
 Dial::Dial (juce::RangedAudioParameter& p, juce::String n, juce::String h)
     : param (p), name (std::move (n)), help (std::move (h)),
-      attachment (p, [this] (float v) { value = v; repaint(); if (onValueChange) onValueChange(); })
+      attachment (p, [this] (float v) { value = v; repaint(); })
 {
     attachment.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::UpDownResizeCursor);

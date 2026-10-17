@@ -54,7 +54,6 @@ public:
     void setMaxDisc (float diameter) { maxDisc = diameter; repaint(); }
     juce::String getHelp() const { return help; }
     std::function<void (Dial*, bool)> onHover;   // the editor shows the help line while hovering
-    std::function<void()> onValueChange;
 
     void paint (juce::Graphics&) override;
     void resized() override;

@@ -47,15 +47,15 @@ double CutFilters::Cut::resonanceAt (double hz) noexcept
 
 void CutFilters::Cut::setTarget (bool on, double hz, const CutKnobs& k) noexcept
 {
-    const int t = std::clamp (k.type, 0, (int) characters (lowpass).size() - 1);
+    wanted = std::clamp (k.type, 0, (int) characters (lowpass).size() - 1);
     manual = std::clamp ((double) k.reso, 0.0, 1.0);
     autoReso = k.autoReso;
     // A silent filter jumps to the knobs and the type, so it wakes up where they are.
     if (fade.isOff())
     {
         log2Hz.snap (hz);
-        if (t != type) now.setCharacter (character (lowpass, t));
-        type = t;
+        if (wanted != type) now.setCharacter (character (lowpass, wanted));
+        type = wanted;
         autoAt = -1.0;
         peak.snap (resonanceAt (hz));
         change.snap (true);
@@ -63,17 +63,23 @@ void CutFilters::Cut::setTarget (bool on, double hz, const CutKnobs& k) noexcept
     else
     {
         log2Hz.setTarget (hz);
-        if (t != type)
-        {
-            before = now;
-            now.setCharacter (character (lowpass, t));
-            type = t;
-            autoAt = -1.0;
-            change.snap (false);
-            change.setOn (true);
-        }
+        changeType();
     }
     fade.setOn (on);
+}
+
+// A type change crossfades from the filter as it runs to the new type, the
+// new one starting from the old one's state. A change asked for while a
+// crossfade runs waits for it to finish: cutting one short would jump.
+void CutFilters::Cut::changeType() noexcept
+{
+    if (wanted == type || ! change.isOn()) return;
+    before = now;
+    now.setCharacter (character (lowpass, wanted));
+    type = wanted;
+    autoAt = -1.0;
+    change.snap (false);
+    change.setOn (true);
 }
 
 void CutFilters::Cut::process (double* v) noexcept
@@ -86,6 +92,7 @@ void CutFilters::Cut::process (double* v) noexcept
         reset();
         return;
     }
+    if (wanted != type) changeType();
 
     const double hz = log2Hz.next();
     peak.setTarget (resonanceAt (hz));
@@ -123,15 +130,16 @@ void CutFilters::prepare (double sampleRate)
     high.prepare (fs * factor);
     pathFade.prepare (fs, 0.02);
     pathFade.settle();
-    history = {};
-    resetPath();
+    reset();
 }
 
 void CutFilters::reset()
 {
     low.reset();
     high.reset();
+    history = {};
     resetPath();
+    resting = true;
 }
 
 void CutFilters::resetPath() noexcept
@@ -219,24 +227,26 @@ void CutFilters::process (float* left, float* right, int n) noexcept
     if (const int want = wantHigh ? oversamplingFor (fs) : 1; want != factor)
     {
         setFactor (want);
-        if (! isBypassed()) settlePath();
+        if (! resting) settlePath();
     }
 
     if (isBypassed())
     {
-        if (! pathFade.isTargetOn())
+        // Resting: only remember the latest input, to wake up settled.
+        for (int i = std::max (0, n - kHistory); i < n; ++i)
         {
-            // Resting: only remember the latest input, to wake up settled.
-            for (int i = std::max (0, n - kHistory); i < n; ++i)
-            {
-                history[0][(size_t) historyPos] = left[i];
-                history[1][(size_t) historyPos] = right[i];
-                historyPos = (historyPos + 1) & (kHistory - 1);
-            }
-            return;
+            history[0][(size_t) historyPos] = left[i];
+            history[1][(size_t) historyPos] = right[i];
+            historyPos = (historyPos + 1) & (kHistory - 1);
         }
+        resting = true;
+        return;
+    }
+    if (resting)
+    {
         // Waking up: the path fades in from its steady state, not from a cold transient.
         settlePath();
+        resting = false;
     }
 
     for (int i = 0; i < n; ++i)
@@ -252,9 +262,6 @@ void CutFilters::process (float* left, float* right, int n) noexcept
         left[i] = (float) (in[0] + p * (out[0] - in[0]));
         right[i] = (float) (in[1] + p * (out[1] - in[1]));
     }
-
-    if (isBypassed())
-        resetPath();
 }
 
 double CutFilters::resonance (bool lowpass, const CutKnobs& k) noexcept

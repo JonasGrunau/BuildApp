@@ -203,6 +203,52 @@ TEST_CASE ("Cut filters: switching on and off, changing type or resonance mode, 
     CHECK (db (worst) < -70.0);
 }
 
+TEST_CASE ("Cut filters: a type change during another one's crossfade doesn't jump", "[filters][click]")
+{
+    // Automation or quick clicks on the step keys: a new type every 5 ms,
+    // each landing while the last crossfade (30 ms) is still running.
+    const double fs = 48000.0;
+    const auto x = sine (220.0, fs, 48000, 0.5);
+    ba::CutFilters f;
+    f.setTargets ({ 0.002f, 0 }, { 1.f });
+    f.prepare (fs);
+    Signal l = x, r = x;
+    const int types[] = { 0, 5, 9, 1, 8, 2 };
+    for (int start = 0, block = 0; start < (int) l.size(); start += 240, ++block)
+    {
+        const int type = block >= 50 && block < 56 ? types[block - 50] : block >= 56 ? 2 : 0;
+        f.setTargets ({ 0.002f, type }, { 1.f });
+        f.process (l.data() + start, r.data() + start, std::min (240, (int) l.size() - start));
+    }
+    const double worst = above2k (l, fs, 2000);
+    INFO ("largest content above 2 kHz: " << db (worst) << " dBFS");
+    CHECK (db (worst) < -70.0);
+}
+
+TEST_CASE ("Cut filters: in high quality a cut wakes up under a running signal without a transient", "[filters][click]")
+{
+    // The oversampling halfbands start from the recent input, not from zero
+    // (from zero this measured -78 dBFS).
+    const double fs = 48000.0;
+    const auto x = sine (220.0, fs, 48000, 0.5);
+    for (const bool lowpass : { false, true })
+    {
+        ba::CutFilters f;
+        f.prepare (fs);
+        f.setHighQuality (true);
+        Signal l = x, r = x;
+        for (int start = 0, block = 0; start < (int) l.size(); start += 256, ++block)
+        {
+            const bool on = block >= 40;
+            f.setTargets ({ on && ! lowpass ? 0.002f : 0.f, 0 }, { on && lowpass ? 0.998f : 1.f, 0 });
+            f.process (l.data() + start, r.data() + start, std::min (256, (int) l.size() - start));
+        }
+        const double worst = above2k (l, fs, 2000);
+        INFO ((lowpass ? "high cut" : "low cut") << ": largest content above 2 kHz: " << db (worst) << " dBFS");
+        CHECK (db (worst) < -80.0);
+    }
+}
+
 TEST_CASE ("Cut filters: every type sweeps the loop bounded and rings out", "[filters]")
 {
     const double fs = 44100.0;

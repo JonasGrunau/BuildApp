@@ -15,7 +15,7 @@ void Spectrum::prepare (double sampleRate)
 {
     fs = sampleRate;
     int order = 12;
-    while ((1 << order) < 4096.0 * fs / 48000.0) ++order;
+    while ((1 << order) < 4096.0 * fs / 48000.0 && order < 14) ++order;   // 16384 at most: half a tap
     size = 1 << order;
     fft = std::make_unique<dsp::Fft> (order);
     window = dsp::hann (size);

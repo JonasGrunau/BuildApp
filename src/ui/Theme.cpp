@@ -8,13 +8,11 @@ namespace
 {
     struct Typefaces
     {
-        juce::Typeface::Ptr condMedium, condSemi, mono, monoMedium;
+        juce::Typeface::Ptr condSemi, mono;
         Typefaces()
         {
-            condMedium = juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexSansCondensedMedium_ttf, BinaryData::IBMPlexSansCondensedMedium_ttfSize);
             condSemi = juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexSansCondensedSemiBold_ttf, BinaryData::IBMPlexSansCondensedSemiBold_ttfSize);
             mono = juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexMonoRegular_ttf, BinaryData::IBMPlexMonoRegular_ttfSize);
-            monoMedium = juce::Typeface::createSystemTypefaceFor (BinaryData::IBMPlexMonoMedium_ttf, BinaryData::IBMPlexMonoMedium_ttfSize);
         }
     };
 
@@ -31,10 +29,8 @@ namespace
 } // namespace
 
 juce::Font label (float h) { return make (faces().condSemi, h, 0.12f); }
-juce::Font text (float h) { return make (faces().condMedium, h, 0.01f); }
 juce::Font title (float h) { return make (faces().condSemi, h, -0.01f); }
 juce::Font mono (float h) { return make (faces().mono, h); }
-juce::Font monoStrong (float h) { return make (faces().monoMedium, h); }
 
 void caption (juce::Graphics& g, const juce::String& s, juce::Rectangle<float> area, juce::Justification j, juce::Colour c, float height)
 {
