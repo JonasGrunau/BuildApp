@@ -86,11 +86,12 @@ private:
     std::unique_ptr<juce::TextEditor> entry;
 };
 
-// A choice parameter as a line of text: its name, the current choice and a
-// chevron. Click for a menu of the choices (in sections), wheel to step
-// through them; hovering shows the current choice's help line. With
-// steppers, a < and a > key right after the menu's chevron step to the
-// previous / next choice, wrapping at the ends. A preset can drive it: then it shows the
+// A choice parameter as a line of text: its name, then a fixed-width field
+// with the current choice and a chevron at its right end. Click for a menu
+// of the choices (in sections), wheel to step through them; hovering shows
+// the current choice's help line. With steppers, a < and a > key right after
+// the chevron step to the previous / next choice, wrapping at the ends; the
+// field keeps them in one place whatever the choice. A preset can drive it: then it shows the
 // preset's choice, without the chevron, its keys dimmed, and can't be changed.
 class TypeSelector : public juce::Component
 {
@@ -106,7 +107,12 @@ public:
     void setDriven (std::optional<int> choice);
     bool isDriven() const { return driven.has_value(); }
     void setSteppers (bool on) { steppers = on; repaint(); }
-    int idealWidth() const;   // room for the widest choice, its chevron and the keys
+    float widestChoice() const { return widest; }
+    float choiceX() const;   // where the field (the choice text) starts
+    // Lines the field up with other selectors: it starts at x at the
+    // earliest and is w wide, never closer to the name or narrower than the widest choice.
+    void setField (float x, float w) { fieldX = x; field = std::max (widest, w); repaint(); }
+    int idealWidth() const;   // room for the field, its chevron and the keys
     std::function<void (TypeSelector*, bool)> onHover;
 
     void paint (juce::Graphics&) override;
@@ -124,8 +130,6 @@ private:
     int index() const { return juce::jlimit (0, (int) choices.size() - 1, driven.value_or (juce::roundToInt (value))); }
     void choose (int i);
     juce::Rectangle<float> stepKey (int direction) const;   // -1: <, +1: >
-    float choiceX() const;                                   // where the choice text starts
-    float choiceWidth() const;                               // the current choice's text
     Part partAt (juce::Point<float> p) const;
     void setHover (Part p);
 
@@ -133,7 +137,7 @@ private:
     juce::String name;
     std::vector<Choice> choices;
     juce::ParameterAttachment attachment;
-    float value = 0.f, wheel = 0.f, widest = 0.f;
+    float value = 0.f, wheel = 0.f, widest = 0.f, fieldX = 0.f, field = 0.f;   // field: the choice text's room, >= widest
     std::optional<int> driven;
     bool open = false, steppers = false;
     Part hover = Part::none, pressed = Part::none;

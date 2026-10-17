@@ -105,6 +105,13 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
     }
     preset.setSteppers (true);
     preset.onHover = [this] (TypeSelector* sel, bool on) { showHelp (on ? sel->getHelp() : juce::String()); };
+    // One field width for the three menus, room for the longest name in any of
+    // them; the preset's field starts where the low cut's does, right under it.
+    const float field = std::max ({ preset.widestChoice(), lowCutType.widestChoice(), highCutType.widestChoice() });
+    const float fieldX = std::max (preset.choiceX(), lowCutType.choiceX());
+    preset.setField (fieldX, field);
+    lowCutType.setField (fieldX, field);
+    highCutType.setField (0.f, field);
     timeline.onHover = [this] (bool on) {
         showHelp (on ? juce::String (juce::CharPointer_UTF8 ("Where the preset takes each control as BUILD rises, the built part lit \xc2\xb7 drag to scrub BUILD, double-click to drop it to 0."))
                      : juce::String());

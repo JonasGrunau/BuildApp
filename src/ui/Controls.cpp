@@ -298,6 +298,7 @@ TypeSelector::TypeSelector (juce::RangedAudioParameter& p, juce::String n, std::
       attachment (p, [this] (float v) { value = v; repaint(); })
 {
     for (const auto& ch : choices) widest = std::max (widest, textWidth (mono (10.5f), ch.name));
+    field = widest;
     attachment.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setOpaque (true);
@@ -326,26 +327,21 @@ void TypeSelector::choose (int i)
 
 float TypeSelector::choiceX() const
 {
-    return textWidth (label (9.f), name.toUpperCase()) + 2.f + 7.f;
+    return std::max (textWidth (label (9.f), name.toUpperCase()) + 2.f + 7.f, fieldX);
 }
 
-float TypeSelector::choiceWidth() const
-{
-    return textWidth (mono (10.5f), choices[(size_t) index()].name);
-}
-
-// The step keys sit 8 px after the current choice's chevron (after its
-// text when a preset holds it and there is no chevron), as tall as a
-// section tag box and centred on the line.
+// The step keys sit 8 px after the field's chevron (where it would be while
+// a preset holds the choice), as tall as a section tag box and centred on
+// the line: one place for every choice.
 juce::Rectangle<float> TypeSelector::stepKey (int direction) const
 {
-    const float x = choiceX() + choiceWidth() + (isDriven() ? 0.f : 12.f) + 8.f + (direction > 0 ? 16.f : 0.f);
+    const float x = choiceX() + field + 12.f + 8.f + (direction > 0 ? 16.f : 0.f);
     return juce::Rectangle<float> (13.f, 13.f).withCentre ({ x + 6.5f, (float) getHeight() * 0.5f });
 }
 
 int TypeSelector::idealWidth() const
 {
-    return (int) std::ceil (choiceX() + widest + 14.f + (steppers ? 8.f + 16.f + 13.f + 4.f : 0.f));
+    return (int) std::ceil (choiceX() + field + 14.f + (steppers ? 8.f + 16.f + 13.f + 4.f : 0.f));
 }
 
 TypeSelector::Part TypeSelector::partAt (juce::Point<float> p) const
@@ -381,11 +377,11 @@ void TypeSelector::paint (juce::Graphics& g)
     const float wName = textWidth (g.getCurrentFont(), name.toUpperCase());
     caption (g, name, r.removeFromLeft (wName + 2.f), juce::Justification::centredLeft, hot ? col::ink : col::inkSoft, 9.f);
     r.setLeft (choiceX());
+    r.setRight (choiceX() + field + 14.f);   // the field and its chevron; the keys follow
 
     // Step keys: outlined, ink on hover, pressed one pixel down; dimmed while a preset holds the choice.
     if (steppers)
     {
-        r.setRight (choiceX() + choiceWidth() + 14.f);   // the choice and its chevron; the keys follow
         for (const int dir : { -1, 1 })
         {
             const auto part = dir < 0 ? Part::prev : Part::next;
@@ -403,14 +399,14 @@ void TypeSelector::paint (juce::Graphics& g)
         }
     }
 
-    // Chevron at the right end of the text; none when a preset holds it.
+    // Chevron at the right end of the field; none when a preset holds it.
     const auto text = choices[(size_t) index()].name;
     g.setFont (mono (10.5f));
-    const float wText = std::min (textWidth (g.getCurrentFont(), text), r.getWidth() - 14.f);
+    const float wText = std::min (textWidth (g.getCurrentFont(), text), field);
     g.setColour (col::ink);
     g.drawText (text, r.withWidth (wText + 2.f), juce::Justification::centredLeft, true);
     if (isDriven()) return;
-    const float cx = r.getX() + wText + 9.f, cy = r.getCentreY();
+    const float cx = r.getX() + field + 9.f, cy = r.getCentreY();
     juce::Path chevron;
     chevron.startNewSubPath (cx - 3.f, cy - 1.5f);
     chevron.lineTo (cx, cy + 1.5f);
@@ -420,7 +416,7 @@ void TypeSelector::paint (juce::Graphics& g)
     if (menuHot)
     {
         g.setColour (col::inkFaint);
-        g.fillRect (r.getX(), r.getBottom() - 1.f, wText + 12.f, 1.f);
+        g.fillRect (r.getX(), r.getBottom() - 1.f, field + 12.f, 1.f);
     }
 }
 
