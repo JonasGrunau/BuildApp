@@ -16,13 +16,17 @@ namespace
     // Each section: a rule, its tag (13 high) kGap clear of it, its content
     // kGap clear of the tag, and kGap from the content to the next rule.
     constexpr float kGap = 12.f, kTagH = 13.f, kRuleH = 1.f;
-    constexpr float kBuildTagY = 87.f, kBuildY = kBuildTagY + kTagH + kGap, kBuildH = 106.f;            // A (under the 1.5 px masthead rule at 74)
-    constexpr float kBuildRuleY = kBuildY + kBuildH + kGap;                                              // 230
+    // A (under the 1.5 px masthead rule at 74): seven lanes of 22 px (room
+    // for their intensity knobs) over the BUILD axis.
+    constexpr float kBuildTagY = 87.f, kBuildY = kBuildTagY + kTagH + kGap, kBuildH = 7.f * 22.f + BuildTimeline::kAxis;
+    constexpr float kBuildRuleY = kBuildY + kBuildH + kGap;                                              // 294
+    constexpr float kBuildDisc = 120.f;                                                                  // the BUILD knob
     constexpr float kSpecTagY = kBuildRuleY + kRuleH + kGap, kSpecY = kSpecTagY + kTagH + kGap, kSpecH = 194.f;   // B
     constexpr float kRuleY = kSpecY + kSpecH + kGap, kTagY = kRuleY + kRuleH + kGap;                    // C..G
     constexpr float kDialY = kTagY + kTagH + kGap, kDialH = 108.f;
-    constexpr float kFootRuleY = 634.f;
+    constexpr float kFootRuleY = kDialY + kDialH + 14.f;
     static_assert (kBuildRuleY - (kBuildTagY + kTagH + kGap) == (float) BuildAppEditor::kFold, "folded, the rule sits kGap under the tag");
+    static_assert (kFootRuleY == (float) BuildAppEditor::kHeight - 32.f, "the footer line sits 4 px over the footer");
 
     std::vector<TypeSelector::Choice> typeChoices (bool lowpass)
     {
@@ -89,7 +93,7 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
     noisePitch.setRing (Dial::Ring::position);
     level.setRing (Dial::Ring::bipolar);
     mix.setRing (Dial::Ring::plain);
-    build.setMaxDisc (84.f);
+    build.setMaxDisc (kBuildDisc);
     build.onHover = [this] (Dial* d, bool on) { showHelp (on ? d->getHelp() : juce::String()); };
     for (auto* d : { &lowCut, &lowReso, &highCut, &highReso, &pitch, &noise, &noisePitch, &noiseLowCut, &reverb, &stereo, &level, &mix })
         d->onHover = [this, d] (Dial*, bool on) { showHelp (! on ? juce::String() : d->isLocked() ? lockedHelp() : d->getHelp()); };
@@ -112,10 +116,7 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
     preset.setField (fieldX, field);
     lowCutType.setField (fieldX, field);
     highCutType.setField (0.f, field);
-    timeline.onHover = [this] (bool on) {
-        showHelp (on ? juce::String (juce::CharPointer_UTF8 ("Where the preset takes each control as BUILD rises, the built part lit \xc2\xb7 drag to scrub BUILD, double-click to drop it to 0."))
-                     : juce::String());
-    };
+    timeline.onHelp = [this] (const juce::String& line) { showHelp (line); };
     spectrum.onHover = [this] (bool on) {
         showHelp (on ? juce::String (juce::CharPointer_UTF8 ("Drag a marker to move that cut \xc2\xb7 drag it past the edge or double-click it to switch it off.")) : juce::String());
     };
@@ -160,7 +161,9 @@ void BuildAppEditor::layout()
     outMeter.setBounds (720, 24, 136, 26);
     preset.setBounds (150, (int) kBuildTagY - 2, preset.idealWidth(), 17);
     timeline.setBounds (24, (int) kBuildY, 680, (int) kBuildH);
-    build.setBounds (728, (int) kBuildY + 1, 128, (int) kBuildH + 6);   // its value on the timeline's axis line
+    // Its value on the timeline's axis line (the disc, 4 px, the name's 13 px, then the value).
+    const float buildTop = kBuildY + kBuildH - BuildTimeline::kAxis + 4.f - (kBuildDisc + 17.f);
+    build.setBounds (728, (int) buildTop, 128, (int) kBuildDisc + 36);
     timeline.setVisible (open);
     build.setVisible (open);
 

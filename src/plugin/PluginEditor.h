@@ -5,11 +5,12 @@
 #include "ui/Controls.h"
 #include "ui/SpectrumView.h"
 
-// One sheet, laid out at 880 x 666 and scaled as a whole when the window is
+// One sheet, laid out at 880 x 730 and scaled as a whole when the window is
 // resized (fixed aspect); with no preset the build band folds away to its
 // menu and the sheet is 880 x 548:
 //   header   wordmark, input and output meters
-//   A        build: the preset menu, the timeline of what it drives, the BUILD knob
+//   A        build: the preset menu, the timeline of what it drives (a lane
+//            per control, each with its intensity knob), the BUILD knob
 //   B        spectrum with the cuts and the noise band; the cut types in its header
 //   C..G     filter (cuts, their resonance and auto switches), pitch, noise,
 //            space, output; what the preset drives is locked
@@ -21,8 +22,8 @@
 class BuildAppEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
-    static constexpr int kWidth = 880, kHeight = 666;   // with a preset
-    static constexpr int kFold = 118;                   // what the build band gives back without one
+    static constexpr int kWidth = 880, kHeight = 730;   // with a preset
+    static constexpr int kFold = 182;                   // what the build band gives back without one
 
     explicit BuildAppEditor (BuildAppProcessor&);
     ~BuildAppEditor() override;
@@ -62,7 +63,7 @@ private:
     juce::String defaultHelp() const;        // the footer when nothing is hovered
     juce::String lockedHelp() const;
 
-    juce::Rectangle<int> footerArea() const { return { 24, 638 - (int) fold(), 832, 22 }; }
+    juce::Rectangle<int> footerArea() const { return { 24, kHeight - 28 - (int) fold(), 832, 22 }; }
 
     BuildAppProcessor& proc;
     NightLookAndFeel lnf;

@@ -291,6 +291,132 @@ void Dial::mouseDoubleClick (const juce::MouseEvent&)
     repaint();
 }
 
+// ---- SmallDial ---------------------------------------------------------------------
+
+SmallDial::SmallDial (juce::RangedAudioParameter& p, juce::String n)
+    : param (p), name (std::move (n)),
+      attachment (p, [this] (float v) {
+          value = v;
+          repaint();
+          if (isMouseOverOrDragging() && onHover) onHover (this, true);   // the footer follows the value
+      })
+{
+    attachment.sendInitialUpdate();
+    setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+    setRepaintsOnMouseActivity (false);
+    setOpaque (true);
+}
+
+juce::String SmallDial::getHelp() const
+{
+    return name + " " + param.getText (param.convertTo0to1 (value), 0) + theme::dot + help;
+}
+
+void SmallDial::paint (juce::Graphics& g)
+{
+    g.fillAll (col::sheet);
+    const auto b = getLocalBounds().toFloat();
+    const auto c = b.getCentre();
+    const float R = std::min (b.getWidth(), b.getHeight()) * 0.5f - 1.f;
+    const float norm = param.convertTo0to1 (value);
+    const bool hot = isMouseOverOrDragging();
+    const auto angle = [] (float t) { return juce::MathConstants<float>::pi * (-0.75f + 1.5f * t); };
+    const auto at = [&] (float a, float r) { return juce::Point<float> (c.x + r * std::sin (a), c.y - r * std::cos (a)); };
+
+    // Ring: the whole travel dark, lit from the left to the value.
+    const auto arc = [&] (float from, float to) {
+        juce::Path p;
+        p.addCentredArc (c.x, c.y, R - 0.8f, R - 0.8f, 0.f, angle (from), angle (to), true);
+        return p;
+    };
+    g.setColour (col::hairline.brighter (0.25f));
+    g.strokePath (arc (0.f, 1.f), juce::PathStrokeType (1.2f));
+    if (norm > 1e-4f)
+    {
+        g.setColour (hot ? col::ink : col::inkSoft);
+        g.strokePath (arc (0.f, norm), juce::PathStrokeType (1.6f));
+    }
+
+    // Disc and pointer.
+    const float rd = R * 0.6f;
+    const auto disc = juce::Rectangle<float> (2.f * rd, 2.f * rd).withCentre (c);
+    g.setColour (col::raised);
+    g.fillEllipse (disc);
+    g.setColour (hot ? col::inkSoft : col::hairline.brighter (0.4f));
+    g.drawEllipse (disc, 1.f);
+    g.setColour (col::ink);
+    juce::Path pointer;
+    pointer.startNewSubPath (at (angle (norm), rd * 0.15f));
+    pointer.lineTo (at (angle (norm), rd * 0.95f));
+    g.strokePath (pointer, juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+}
+
+void SmallDial::nudge (float delta, bool asGesture)
+{
+    const float plain = param.convertFrom0to1 (juce::jlimit (0.f, 1.f, param.convertTo0to1 (value) + delta));
+    if (asGesture) attachment.setValueAsPartOfGesture (plain);
+    else attachment.setValueAsCompleteGesture (plain);
+}
+
+void SmallDial::reset() { attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue())); }
+
+void SmallDial::mouseDown (const juce::MouseEvent& e)
+{
+    if (e.mods.isAltDown() || e.mods.isCommandDown())
+    {
+        reset();
+        return;
+    }
+    dragging = true;
+    lastY = e.position.y;
+    attachment.beginGesture();
+    repaint();
+}
+
+void SmallDial::mouseDrag (const juce::MouseEvent& e)
+{
+    if (! dragging) return;
+    const float dy = lastY - e.position.y;
+    lastY = e.position.y;
+    nudge (dy / 160.f * (e.mods.isShiftDown() ? 0.08f : 1.f), true);
+}
+
+void SmallDial::mouseUp (const juce::MouseEvent&)
+{
+    if (! dragging) return;
+    dragging = false;
+    attachment.endGesture();
+    repaint();
+}
+
+void SmallDial::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (dragging)
+    {
+        dragging = false;
+        attachment.endGesture();
+    }
+    reset();
+}
+
+void SmallDial::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
+{
+    const float d = (std::abs (w.deltaY) > std::abs (w.deltaX) ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.f : 1.f);
+    nudge (d * 0.06f * (e.mods.isShiftDown() ? 0.1f : 1.f), false);
+}
+
+void SmallDial::mouseEnter (const juce::MouseEvent&)
+{
+    repaint();
+    if (onHover) onHover (this, true);
+}
+
+void SmallDial::mouseExit (const juce::MouseEvent&)
+{
+    repaint();
+    if (onHover) onHover (this, false);
+}
+
 // ---- TypeSelector ------------------------------------------------------------------
 
 TypeSelector::TypeSelector (juce::RangedAudioParameter& p, juce::String n, std::vector<Choice> c)

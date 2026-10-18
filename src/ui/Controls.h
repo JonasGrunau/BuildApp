@@ -86,6 +86,41 @@ private:
     std::unique_ptr<juce::TextEditor> entry;
 };
 
+// A small knob on a parameter, for a row of a display (the timeline's lane
+// intensities): the Dial in miniature, a grey ring lit from the left to the
+// value around a disc and its pointer, no text. Its words go to the footer:
+// getHelp() is its name and value, then the help line, and onHover runs
+// again as the value moves under the mouse. Drag up/down (Shift = fine),
+// wheel; double-click or Alt/Cmd-click resets it.
+class SmallDial : public juce::Component
+{
+public:
+    SmallDial (juce::RangedAudioParameter& p, juce::String name);
+
+    void setHelp (juce::String line) { help = std::move (line); }
+    juce::String getHelp() const;
+    std::function<void (SmallDial*, bool)> onHover;
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDoubleClick (const juce::MouseEvent&) override;
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+    void mouseEnter (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+
+private:
+    void nudge (float deltaNorm, bool asGesture);
+    void reset();
+
+    juce::RangedAudioParameter& param;
+    juce::String name, help;
+    juce::ParameterAttachment attachment;
+    float value = 0.f, lastY = 0.f;
+    bool dragging = false;
+};
+
 // A choice parameter as a line of text: its name, then a fixed-width field
 // with the current choice and a chevron at its right end. Click for a menu
 // of the choices (in sections), wheel to step through them; hovering shows

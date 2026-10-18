@@ -382,10 +382,36 @@ namespace ba
         return false;
     }
 
-    // The knobs the chain runs with: `own` (the user's), with every control
-    // the preset drives set to where it is at `build` (0..1).
-    inline Settings applyPreset (const Preset& p, float build, Settings s) noexcept
+    // How much of each lane's path lands in the output, 0..1 (1: the preset as
+    // designed). A lane at intensity k sits k of the way from where its
+    // control rests by default to where the preset takes it (the noise: k of
+    // its amplitude): low cut, high cut, pitch, noise, reverb and stereo
+    // towards rest (off), noise pitch and
+    // the noise's low cut towards their defaults (1.1 kHz, 200 Hz), a
+    // resonance towards auto resonance, level (the gain lane and the fade into
+    // the tail) towards 0 dB. Pitch stairs stay on whole semitones. With no
+    // reverb lane, the reverb row is your knob plus the tail, and only the
+    // tail scales. At 0 a lane is at rest, so a preset that rests at BUILD 0
+    // still does at any intensity.
+    struct Intensity
     {
+        float lowCut = 1.f, lowReso = 1.f, highCut = 1.f, highReso = 1.f, pitch = 1.f, noise = 1.f, noisePitch = 1.f,
+              noiseLowCut = 1.f, reverb = 1.f, stereo = 1.f, level = 1.f;
+
+        constexpr bool asDesigned() const noexcept
+        {
+            return lowCut == 1.f && lowReso == 1.f && highCut == 1.f && highReso == 1.f && pitch == 1.f && noise == 1.f
+                   && noisePitch == 1.f && noiseLowCut == 1.f && reverb == 1.f && stereo == 1.f && level == 1.f;
+        }
+        static constexpr Intensity none() noexcept { return { 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f }; }
+    };
+
+    // The knobs the chain runs with: `own` (the user's), with every control
+    // the preset drives set to where it is at `build` (0..1), each lane at
+    // its intensity.
+    inline Settings applyPreset (const Preset& p, float build, Settings s, const Intensity& k = {}) noexcept
+    {
+        const float ownReverb = s.reverb;
         const float at = std::min (std::max (build, 0.f) / kPathEnd, 1.f);   // along the path
         if (p.lowCutType >= 0)
         {
@@ -420,6 +446,43 @@ namespace ba
                 s.fadeDb = std::min (0.f, kFadeToDb - s.makeupDb) * down;
             }
         }
+        if (k.asDesigned()) return s;
+
+        const Settings rest;
+        const auto scale = [] (float& v, float base, float amount) { if (amount != 1.f) v = base + (v - base) * amount; };
+        // A resonance lane goes towards what auto resonance does at the
+        // (scaled) cutoff; at 0 it is auto again.
+        const auto reso = [] (bool lowpass, float& v, bool& autoOn, CutKnobs knobs, float amount) {
+            if (amount == 1.f || autoOn) return;
+            if (amount <= 0.f) { autoOn = true; return; }
+            knobs.autoReso = true;
+            const float a = (float) CutFilters::resonance (lowpass, knobs);
+            v = a + (v - a) * amount;
+        };
+        if (p.lowCutType >= 0)
+        {
+            scale (s.lowCut, rest.lowCut, k.lowCut);
+            reso (false, s.lowCutReso, s.lowCutAuto, s.lowCutKnobs(), k.lowReso);
+        }
+        if (p.highCutType >= 0)
+        {
+            scale (s.highCut, rest.highCut, k.highCut);
+            reso (true, s.highCutReso, s.highCutAuto, s.highCutKnobs(), k.highReso);
+        }
+        if (p.pitch.driven() && k.pitch != 1.f)
+        {
+            s.pitch *= k.pitch;
+            if (p.pitch.step > 0.f) s.pitch = p.pitch.step * std::floor (s.pitch / p.pitch.step + 1e-4f);
+        }
+        // The noise scales in amplitude (half is -6 dB), not along its knob's
+        // audio taper, where a quarter would already be -36 dB.
+        if (p.noise.driven() && k.noise != 1.f) s.noise *= std::cbrt (std::max (k.noise, 0.f));
+        if (p.noisePitch.driven()) scale (s.noisePitch, rest.noisePitch, k.noisePitch);
+        if (p.noiseLowCut.driven()) scale (s.noiseLowCut, rest.noiseLowCut, k.noiseLowCut);
+        scale (s.reverb, p.reverb.driven() ? rest.reverb : ownReverb, k.reverb);
+        if (p.stereo.driven()) scale (s.stereo, rest.stereo, k.stereo);
+        scale (s.makeupDb, 0.f, k.level);
+        scale (s.fadeDb, 0.f, k.level);
         return s;
     }
 

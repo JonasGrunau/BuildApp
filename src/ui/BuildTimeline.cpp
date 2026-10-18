@@ -4,9 +4,56 @@
 
 using namespace theme;
 
+namespace
+{
+    const juce::String kBandHelp (juce::CharPointer_UTF8 (
+        "Where the preset takes each control as BUILD rises, the built part lit \xc2\xb7 drag to scrub BUILD, double-click to drop it to 0."));
+}
+
 BuildTimeline::BuildTimeline (BuildAppProcessor& p) : proc (p)
 {
     setOpaque (true);
+    // In Lane order.
+    const std::pair<const char*, const char*> knobParams[kLanes] = {
+        { ids::lowCutIntensity, "Low cut intensity" },   { ids::lowResoIntensity, "Low reso intensity" },
+        { ids::highCutIntensity, "High cut intensity" }, { ids::highResoIntensity, "High reso intensity" },
+        { ids::pitchIntensity, "Pitch intensity" },      { ids::noiseIntensity, "Noise intensity" },
+        { ids::noisePitchIntensity, "Noise pitch intensity" }, { ids::noiseLowCutIntensity, "Noise cut intensity" },
+        { ids::reverbIntensity, "Reverb intensity" },    { ids::stereoIntensity, "Stereo intensity" },
+        { ids::levelIntensity, "Level intensity" },
+    };
+    for (size_t i = 0; i < kLanes; ++i)
+    {
+        knobs[i] = std::make_unique<SmallDial> (proc.param (knobParams[i].first), knobParams[i].second);
+        knobs[i]->onHover = [this] (SmallDial* d, bool on) { if (onHelp) onHelp (on ? d->getHelp() : juce::String()); };
+        addChildComponent (*knobs[i]);
+    }
+}
+
+void BuildTimeline::mouseEnter (const juce::MouseEvent&) { if (onHelp) onHelp (kBandHelp); }
+void BuildTimeline::mouseExit (const juce::MouseEvent&) { if (onHelp) onHelp ({}); }
+
+// What turning a lane all the way down leaves, for the knob's help line.
+juce::String BuildTimeline::knobHelp (Lane lane, const ba::Preset& p) const
+{
+    const auto byDefault = [this] (const char* id) { auto& prm = proc.param (id); return prm.getText (prm.getDefaultValue(), 0); };
+    juce::String zero;
+    switch (lane)
+    {
+        case lowCut:      zero = "the low cut stays off"; break;
+        case highCut:     zero = "the high cut stays off"; break;
+        case lowReso:
+        case highReso:    zero = "auto resonance"; break;
+        case pitch:       zero = "no shift"; break;
+        case noise:       zero = "no noise"; break;
+        case noisePitch:  zero = "the band sits at " + byDefault (ids::noisePitch); break;
+        case noiseLowCut: zero = "the noise cut stays at " + byDefault (ids::noiseLowCut); break;
+        case reverb:      zero = p.reverb.driven() ? "no reverb, no tail" : "no tail, just your reverb knob"; break;
+        case stereo:      zero = "the full image"; break;
+        case level:       zero = "no makeup gain, no fade"; break;
+        case kLanes:      break;
+    }
+    return "How much of this lane you hear; 0 %: " + zero + ".";
 }
 
 std::vector<BuildTimeline::Row> BuildTimeline::rows (const ba::Preset& p) const
@@ -21,31 +68,31 @@ std::vector<BuildTimeline::Row> BuildTimeline::rows (const ba::Preset& p) const
     };
     const auto travel = [] (float v) { return v; };
     std::vector<Row> out;
-    const auto add = [&] (bool shown, const char* label, std::function<float (const ba::Settings&)> value,
+    const auto add = [&] (bool shown, Lane lane, const char* label, std::function<float (const ba::Settings&)> value,
                           std::function<float (float)> height, std::function<juce::String (float)> text, bool bipolar = false) {
-        if (shown) out.push_back ({ label, std::move (value), std::move (height), std::move (text), bipolar });
+        if (shown) out.push_back ({ lane, label, std::move (value), std::move (height), std::move (text), bipolar });
     };
-    add (p.lowCut.driven(), "Low cut", [] (const ba::Settings& s) { return s.lowCut; }, travel, words (ids::lowCut));
-    add (p.lowReso.driven(), "Low reso", [] (const ba::Settings& s) { return s.lowCutReso; }, travel, words (ids::lowCutReso, 100.f));
-    add (p.highCut.driven(), "High cut", [] (const ba::Settings& s) { return s.highCut; }, [] (float v) { return 1.f - v; }, words (ids::highCut));
-    add (p.highReso.driven(), "High reso", [] (const ba::Settings& s) { return s.highCutReso; }, travel, words (ids::highCutReso, 100.f));
-    add (p.pitch.driven(), "Pitch", [] (const ba::Settings& s) { return s.pitch; },
+    add (p.lowCut.driven(), lowCut, "Low cut", [] (const ba::Settings& s) { return s.lowCut; }, travel, words (ids::lowCut));
+    add (p.lowReso.driven(), lowReso, "Low reso", [] (const ba::Settings& s) { return s.lowCutReso; }, travel, words (ids::lowCutReso, 100.f));
+    add (p.highCut.driven(), highCut, "High cut", [] (const ba::Settings& s) { return s.highCut; }, [] (float v) { return 1.f - v; }, words (ids::highCut));
+    add (p.highReso.driven(), highReso, "High reso", [] (const ba::Settings& s) { return s.highCutReso; }, travel, words (ids::highCutReso, 100.f));
+    add (p.pitch.driven(), pitch, "Pitch", [] (const ba::Settings& s) { return s.pitch; },
          [] (float v) { return v / (float) ba::map::kMaxPitch; }, words (ids::pitch));
-    add (p.noise.driven(), "Noise", [] (const ba::Settings& s) { return s.noise; }, travel, words (ids::noise));
-    add (p.noisePitch.driven(), "Noise pitch", [] (const ba::Settings& s) { return s.noisePitch; }, travel, words (ids::noisePitch));
-    add (p.noiseLowCut.driven(), "Noise cut", [] (const ba::Settings& s) { return s.noiseLowCut; }, travel, words (ids::noiseLowCut));
-    add (true, "Reverb", [] (const ba::Settings& s) { return s.reverb; }, travel, words (ids::reverb));
-    add (p.stereo.driven(), "Stereo", [] (const ba::Settings& s) { return s.stereo; }, travel, words (ids::stereo));
+    add (p.noise.driven(), noise, "Noise", [] (const ba::Settings& s) { return s.noise; }, travel, words (ids::noise));
+    add (p.noisePitch.driven(), noisePitch, "Noise pitch", [] (const ba::Settings& s) { return s.noisePitch; }, travel, words (ids::noisePitch));
+    add (p.noiseLowCut.driven(), noiseLowCut, "Noise cut", [] (const ba::Settings& s) { return s.noiseLowCut; }, travel, words (ids::noiseLowCut));
+    add (true, reverb, "Reverb", [] (const ba::Settings& s) { return s.reverb; }, travel, words (ids::reverb));
+    add (p.stereo.driven(), stereo, "Stereo", [] (const ba::Settings& s) { return s.stereo; }, travel, words (ids::stereo));
 
     // Level: the makeup gain and the fade into the tail together, in dB.
-    add (true, "Level", [] (const ba::Settings& s) { return s.makeupDb + s.fadeDb; },
+    add (true, level, "Level", [] (const ba::Settings& s) { return s.makeupDb + s.fadeDb; },
          [] (float db) { return 0.5f + db / 12.f; }, [] (float db) { return fmt::signedNumber (db, 1) + " dB"; }, true);
     return out;
 }
 
 juce::Rectangle<float> BuildTimeline::plot() const
 {
-    return getLocalBounds().toFloat().withTrimmedLeft (kLabelW).withTrimmedRight (kValueW + 10.f).withTrimmedBottom (kAxis);
+    return getLocalBounds().toFloat().withTrimmedLeft (kLabelW).withTrimmedRight (kValueW + kKnobW + kGap).withTrimmedBottom (kAxis);
 }
 
 float BuildTimeline::xFor (float build) const
@@ -54,16 +101,43 @@ float BuildTimeline::xFor (float build) const
     return p.getX() + p.getWidth() * juce::jlimit (0.f, 1.f, build);
 }
 
+void BuildTimeline::placeKnobs()
+{
+    std::array<bool, kLanes> shown {};
+    if (const auto* preset = proc.activePreset())
+    {
+        const auto list = rows (*preset);
+        const auto p = plot();
+        const float laneH = p.getHeight() / (float) std::max<size_t> (1, list.size());
+        for (size_t i = 0; i < list.size(); ++i)
+        {
+            auto& knob = *knobs[(size_t) list[i].lane];
+            const juce::Point<float> centre (p.getRight() + kGap + kKnobW * 0.5f, p.getY() + laneH * ((float) i + 0.5f));
+            knob.setBounds (juce::Rectangle<float> (kKnobW, kKnobW).withCentre (centre).toNearestInt());
+            knob.setHelp (knobHelp (list[i].lane, *preset));
+            shown[(size_t) list[i].lane] = true;
+        }
+    }
+    for (size_t i = 0; i < kLanes; ++i) knobs[i]->setVisible (shown[i]);
+}
+
 void BuildTimeline::refresh()
 {
     const auto* preset = proc.activePreset();
     const float build = proc.buildAmount(), reverb = proc.ownSettings().reverb;   // a preset without a reverb lane tails from yours
-    if (preset == shownPreset && std::abs (build - shownBuild) < 1e-6f && reverb == shownReverb) return;
+    const auto intensity = proc.intensity();
+    const bool sameIntensity = std::all_of (std::begin (kIntensityOf), std::end (kIntensityOf),
+                                            [&] (auto f) { return std::abs (intensity.*f - shownIntensity.*f) < 1e-6f; });
+    if (preset == shownPreset && std::abs (build - shownBuild) < 1e-6f && reverb == shownReverb && sameIntensity) return;
     if (preset != shownPreset)
+    {
         setMouseCursor (preset != nullptr ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
-    shownPreset = preset;
+        shownPreset = preset;
+        placeKnobs();
+    }
     shownBuild = build;
     shownReverb = reverb;
+    shownIntensity = intensity;
     repaint();
 }
 
@@ -77,13 +151,20 @@ void BuildTimeline::paint (juce::Graphics& g)
     const float build = proc.buildAmount(), playX = xFor (build);
     const auto list = rows (*preset);
     const float laneH = p.getHeight() / (float) std::max<size_t> (1, list.size());
-
-    // What the chain runs with along BUILD, sampled once for every lane.
+    // What the chain runs with along BUILD, sampled once for every lane: as
+    // the intensities have it, at full intensity, and at none (where each
+    // lane rests).
     constexpr int kSteps = 240;
     const auto own = proc.ownSettings();
-    std::array<ba::Settings, kSteps + 1> along;
-    for (int k = 0; k <= kSteps; ++k) along[(size_t) k] = ba::applyPreset (*preset, (float) k / kSteps, own);
-    const auto now = ba::applyPreset (*preset, build, own);
+    const auto intensity = proc.intensity();
+    const auto sample = [&] (const ba::Intensity& k) {
+        std::vector<ba::Settings> out ((size_t) kSteps + 1);
+        for (int i = 0; i <= kSteps; ++i) out[(size_t) i] = ba::applyPreset (*preset, (float) i / kSteps, own, k);
+        return out;
+    };
+    const auto full = sample ({}), none = sample (ba::Intensity::none());
+    const auto along = intensity.asDesigned() ? full : sample (intensity);
+    const auto now = ba::applyPreset (*preset, build, own, intensity), restNow = ba::applyPreset (*preset, build, own, ba::Intensity::none());
 
     for (size_t i = 0; i < list.size(); ++i)
     {
@@ -92,24 +173,52 @@ void BuildTimeline::paint (juce::Graphics& g)
         const auto lane = juce::Rectangle<float> (p.getX(), p.getY() + laneH * (float) i, p.getWidth(), laneH);
         const float top = lane.getY() + 3.f, span = lane.getHeight() - 5.f;
 
-        // Each lane spans its own range (gain: one that includes 0 dB), so
-        // when it moves reads at any size; how far is in the value on the right.
-        float lo = row.bipolar ? row.height (0.f) : 1e9f, hi = row.bipolar ? lo : -1e9f;
-        for (int k = 0; k <= kSteps; ++k)
-        {
-            const float h = row.height (valueAt (k));
-            lo = std::min (lo, h);
-            hi = std::max (hi, h);
-        }
+        // Each lane spans its own range, from where it rests to the preset's
+        // full path, so when it moves reads at any size, and turning its
+        // intensity down flattens it towards rest; how far is in the value
+        // on the right.
+        float lo = 1e9f, hi = -1e9f;
+        for (const auto* path : { &full, &none, &along })
+            for (const auto& s : *path)
+            {
+                const float h = row.height (row.value (s));
+                lo = std::min (lo, h);
+                hi = std::max (hi, h);
+            }
         if (hi - lo < 1e-4f) { lo -= 0.5f; hi += 0.5f; }   // held still: a line through the middle
         const auto yFor = [&] (float v) { return top + span * (1.f - (row.height (v) - lo) / (hi - lo)); };
+        const auto pathOf = [&] (const std::vector<ba::Settings>& path) {
+            juce::Path out;
+            for (int k = 0; k <= kSteps; ++k)
+            {
+                const float x = xFor ((float) k / kSteps), y = yFor (row.value (path[(size_t) k]));
+                if (k == 0) out.startNewSubPath (x, y);
+                else out.lineTo (x, y);
+            }
+            return out;
+        };
 
-        // Rest line: the bottom of the lane, or 0 dB for gain.
+        // Rest: where the lane goes at intensity 0. A level line (the bottom,
+        // 0 dB, a default), or auto resonance following the cut.
         g.setColour (col::hairline);
-        g.fillRect (lane.getX(), row.bipolar ? yFor (0.f) : lane.getBottom() - 1.f, lane.getWidth(), 1.f);
+        const float rest0 = row.value (none.front());
+        if (std::all_of (none.begin(), none.end(), [&] (const ba::Settings& s) { return std::abs (row.value (s) - rest0) < 1e-6f; }))
+            g.fillRect (lane.getX(), yFor (rest0) - 0.5f, lane.getWidth(), 1.f);
+        else
+            g.strokePath (pathOf (none), juce::PathStrokeType (1.f));
+
+        // Turned down: the preset's full path stays behind it, dashed.
+        if (intensity.*kIntensityOf[(size_t) row.lane] < 1.f)
+        {
+            juce::Path dashed;
+            const float dashes[] = { 2.f, 3.f };
+            juce::PathStrokeType (1.f).createDashedStroke (dashed, pathOf (full), dashes, 2);
+            g.setColour (col::inkFaint.withAlpha (0.7f));
+            g.fillPath (dashed);
+        }
 
         // The whole path faint; lit in the signal colour (and filled down to
-        // rest) from where it leaves rest up to the playhead: at rest it
+        // rest) from where it leaves its start up to the playhead: at rest it
         // steps back like a knob at rest does.
         const float startH = row.height (valueAt (0));
         const auto moved = [&] (float v) { return std::abs (row.height (v) - startH) > 1e-5f; };
@@ -117,36 +226,32 @@ void BuildTimeline::paint (juce::Graphics& g)
         for (int k = 1; k <= kSteps && leaves > 1.f; ++k)
             if (moved (valueAt (k))) leaves = (float) (k - 1) / kSteps;
 
-        juce::Path whole, built, fill;
-        const float restY = row.bipolar ? yFor (0.f) : top + span;
-        for (int k = 0; k <= kSteps; ++k)
-        {
-            const float x = xFor ((float) k / kSteps), y = yFor (valueAt (k));
-            if (k == 0) whole.startNewSubPath (x, y);
-            else whole.lineTo (x, y);
-        }
+        juce::Path built, fill;
         if (build > leaves)
         {
             const int from = (int) std::floor (leaves * kSteps);
             const auto at = [&] (int k) { return juce::Point<float> (xFor ((float) k / kSteps), yFor (valueAt (k))); };
-            const auto first = at (from), last = juce::Point<float> (playX, yFor (row.value (now)));
-            built.startNewSubPath (first);
-            fill.startNewSubPath (first.x, restY);
-            fill.lineTo (first);
+            const auto restAt = [&] (int k) { return juce::Point<float> (xFor ((float) k / kSteps), yFor (row.value (none[(size_t) k]))); };
+            const auto last = juce::Point<float> (playX, yFor (row.value (now)));
+            built.startNewSubPath (at (from));
+            fill.startNewSubPath (at (from));
+            int to = from;
             for (int k = from + 1; k <= kSteps && (float) k / kSteps < build; ++k)
             {
                 built.lineTo (at (k));
                 fill.lineTo (at (k));
+                to = k;
             }
             built.lineTo (last);
             fill.lineTo (last);
-            fill.lineTo (last.x, restY);
+            fill.lineTo (playX, yFor (row.value (restNow)));
+            for (int k = to; k >= from; --k) fill.lineTo (restAt (k));
             fill.closeSubPath();
             g.setColour (col::accent.withAlpha (0.12f));
             g.fillPath (fill);
         }
         g.setColour (col::inkFaint);
-        g.strokePath (whole, juce::PathStrokeType (1.2f));
+        g.strokePath (pathOf (along), juce::PathStrokeType (1.2f));
         g.setColour (col::accent);
         g.strokePath (built, juce::PathStrokeType (1.6f));
 

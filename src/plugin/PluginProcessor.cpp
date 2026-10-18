@@ -16,11 +16,17 @@ namespace
 
     // The order of rawParams.
     enum Raw { lowCut, highCut, pitch, noise, noisePitch, reverb, stereo, level, mix, lowCutType, highCutType,
-               lowCutReso, highCutReso, lowCutAuto, highCutAuto, noiseLowCut, preset, build };
+               lowCutReso, highCutReso, lowCutAuto, highCutAuto, noiseLowCut, preset, build,
+               lowCutIntensity, lowResoIntensity, highCutIntensity, highResoIntensity, pitchIntensity, noiseIntensity,
+               noisePitchIntensity, noiseLowCutIntensity, reverbIntensity, stereoIntensity, levelIntensity };
     constexpr const char* kRawIds[] = { ids::lowCut, ids::highCut, ids::pitch, ids::noise, ids::noisePitch,
                                         ids::reverb, ids::stereo, ids::level, ids::mix, ids::lowCutType, ids::highCutType,
                                         ids::lowCutReso, ids::highCutReso, ids::lowCutAuto, ids::highCutAuto, ids::noiseLowCut,
-                                        ids::preset, ids::build };
+                                        ids::preset, ids::build,
+                                        ids::lowCutIntensity, ids::lowResoIntensity, ids::highCutIntensity, ids::highResoIntensity,
+                                        ids::pitchIntensity, ids::noiseIntensity, ids::noisePitchIntensity, ids::noiseLowCutIntensity,
+                                        ids::reverbIntensity, ids::stereoIntensity, ids::levelIntensity };
+    static_assert (std::size (kRawIds) == Raw::levelIntensity + 1);
 
     juce::StringArray typeNames (bool lowpass)
     {
@@ -130,14 +136,35 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
               .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
               .withValueFromStringFunction ([] (const String& t) { return (float) juce::jlimit (0.0, 100.0, fmt::parse (t)); })));
 
+    // One intensity per timeline lane (appended: the order is the save format).
+    for (const auto& [id, name] : { std::pair { ids::lowCutIntensity, "Low Cut Intensity" }, { ids::lowResoIntensity, "Low Cut Resonance Intensity" },
+                                    { ids::highCutIntensity, "High Cut Intensity" }, { ids::highResoIntensity, "High Cut Resonance Intensity" },
+                                    { ids::pitchIntensity, "Pitch Intensity" }, { ids::noiseIntensity, "Noise Intensity" },
+                                    { ids::noisePitchIntensity, "Noise Pitch Intensity" }, { ids::noiseLowCutIntensity, "Noise Low Cut Intensity" },
+                                    { ids::reverbIntensity, "Reverb Intensity" }, { ids::stereoIntensity, "Stereo Intensity" },
+                                    { ids::levelIntensity, "Level Intensity" } })
+        layout.add (std::make_unique<AudioParameterFloat> (
+            ParameterID { id, 5 }, name, unit (0.f, 100.f), 100.f,
+            Attr().withLabel ("%")
+                  .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
+                  .withValueFromStringFunction ([] (const String& t) { return (float) juce::jlimit (0.0, 100.0, fmt::parse (t)); })));
+
     return layout;
 }
 
 ba::Settings BuildAppProcessor::settings() const noexcept
 {
     const auto s = ownSettings();
-    if (const auto* p = activePreset()) return ba::applyPreset (*p, buildAmount(), s);
+    if (const auto* p = activePreset()) return ba::applyPreset (*p, buildAmount(), s, intensity());
     return s;
+}
+
+ba::Intensity BuildAppProcessor::intensity() const noexcept
+{
+    const auto at = [this] (int i) { return juce::jlimit (0.f, 1.f, raw (i) / 100.f); };
+    return { at (Raw::lowCutIntensity), at (Raw::lowResoIntensity), at (Raw::highCutIntensity), at (Raw::highResoIntensity),
+             at (Raw::pitchIntensity), at (Raw::noiseIntensity), at (Raw::noisePitchIntensity), at (Raw::noiseLowCutIntensity),
+             at (Raw::reverbIntensity), at (Raw::stereoIntensity), at (Raw::levelIntensity) };
 }
 
 ba::Settings BuildAppProcessor::ownSettings() const noexcept

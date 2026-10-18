@@ -49,9 +49,10 @@ the footer says what it does.
 - **A — Build**: the preset menu, a timeline of what the preset does (one lane
   per control it drives, plus the reverb and the level, which carry the fade
   into the tail; each lit in green from where it starts moving up to BUILD,
-  with the value there on the right) and the BUILD knob. Click or drag
-  the timeline to scrub BUILD; double-click it to drop to 0. With the preset
-  Off the band folds away to its menu and the window gets shorter.
+  then its intensity knob and the value there on the right) and the BUILD
+  knob. Click or drag the timeline to scrub BUILD; double-click it to drop
+  to 0. With the preset Off the band folds away to its menu and the window
+  gets shorter.
 - **B — Spectrum**: the input (faint line) and the output (filled), with the
   cuts' response in green on its own scale (0 dB near the top) and what they
   take away hatched. The noise band shows dotted where it sits.
@@ -82,6 +83,32 @@ back.
   preset's gain left it down to −20 dB. The fade sits before the reverb, so
   the tail follows the music down. Stop at 75 % for the top of the path
   without any of this.
+
+### Intensity: how much of each lane you hear
+
+Every lane of the timeline ends in a small **intensity** knob (100 % by
+default): how much of the preset's path for that control lands in the output.
+Turning it down pulls the lane towards where the control rests, and the
+timeline shows it flattening onto that line with the full path dashed behind
+it. At 0 %:
+
+| Lane | At 0 % |
+|---|---|
+| Low cut, high cut | off |
+| Low / high reso | auto resonance |
+| Pitch | no shift (pitch stairs stay on whole semitones at any intensity) |
+| Noise | no noise; it scales in amplitude, so 50 % is 6 dB down |
+| Noise pitch, noise cut | their defaults, 1.1 kHz and 200 Hz |
+| Reverb | no reverb and no tail (a preset with no reverb lane: no tail, just your reverb knob) |
+| Stereo | the full image |
+| Level | no makeup gain and no fade into the tail |
+
+The intensities are parameters (automatable, saved with the project) and apply
+to whichever preset is on. At 100 % a preset runs exactly as designed; a preset
+that rests at BUILD 0 still does at any intensity, so the drop stays bit-exact.
+Each preset's makeup gain was tuned for its full path: turn a cut down and you
+may want the Level lane down a little too. Drag a knob up or down (Shift for
+fine), use the wheel, double-click or Alt/Cmd-click for 100 %.
 
 The paths follow what producers do by hand: entries are staggered (the low end
 thins first, noise comes in mid-build, pitch rises late, the reverb opens in
@@ -236,7 +263,8 @@ cmake --build build-core
 
 `build/buildapp_snapshot_artefacts/Release/buildapp_snapshot <dir>`
 renders the editor to PNGs (rest, build, peak, cuts, types, and the presets
-rise, squeeze, vacuum, sunrise, pumping, tail and downlift) with the built-in loop playing through it, no DAW
+rise, squeeze, vacuum, sunrise, pumping, tail and downlift, plus intensity and
+scream with lanes turned down) with the built-in loop playing through it, no DAW
 needed. `... <dir> bench` times the paints instead.
 
 ### Trying it without a DAW

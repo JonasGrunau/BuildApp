@@ -20,6 +20,10 @@
 //   downlift preset Downsweep at BUILD 25 %: the noise falling from the hit
 //   steps    rise, with the mouse on the preset's > key and the high cut's
 //            < key held down (it wraps to the last type); the low cut's keys dimmed
+//   intensity rise with the low cut at 50 %, the noise at 25 % and the stereo at
+//            0 % intensity, the mouse on the noise's knob (its help in the footer)
+//   scream   preset Acid Scream at BUILD 60 %, its resonance at 30 % intensity
+//            (resting on auto resonance) and the reverb at 0 %
 //   bench    times the spectrum and whole-editor paints instead
 
 #include "TestUtil.h"
@@ -36,6 +40,7 @@ namespace
         float highReso = 30.f;
         int preset = 0;   // 1-based, 0 = off
         float build = 0.f;
+        std::vector<std::pair<const char*, float>> intensity {};   // percent, by parameter id
     };
 
     void set (BuildAppProcessor& p, const char* id, float plain)
@@ -61,6 +66,22 @@ namespace
         set (p, ids::highCutReso, k.highReso);
         set (p, ids::preset, (float) k.preset);
         set (p, ids::build, k.build);
+        for (const auto& [id, percent] : k.intensity) set (p, id, percent);
+    }
+
+    template <typename T>
+    std::vector<T*> childrenOf (juce::Component& root)
+    {
+        std::vector<T*> out;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
+            for (auto* child : c.getChildren())
+            {
+                if (auto* t = dynamic_cast<T*> (child)) out.push_back (t);
+                walk (*child);
+            }
+        };
+        walk (root);
+        return out;
     }
 
     void pump (int ms) { juce::MessageManager::getInstance()->runDispatchLoopUntil (ms); }
@@ -74,19 +95,7 @@ namespace
         if (press) c.mouseDown (e);
     }
 
-    std::vector<TypeSelector*> typeSelectors (juce::Component& root)   // preset, low cut, high cut
-    {
-        std::vector<TypeSelector*> out;
-        std::function<void (juce::Component&)> walk = [&] (juce::Component& c) {
-            for (auto* child : c.getChildren())
-            {
-                if (auto* t = dynamic_cast<TypeSelector*> (child)) out.push_back (t);
-                walk (*child);
-            }
-        };
-        walk (root);
-        return out;
-    }
+    std::vector<TypeSelector*> typeSelectors (juce::Component& root) { return childrenOf<TypeSelector> (root); }   // preset, low cut, high cut
 
     // Plays `loop` through the processor, ticking the editor about 30 times a second.
     void play (BuildAppProcessor& p, BuildAppEditor& ed, const testutil::Stereo& loop, double fs, double seconds)
@@ -140,7 +149,9 @@ int main (int argc, char** argv)
     for (int i = 2; i < argc; ++i)
         if (const juce::String a (argv[i]); a.startsWith ("--scale=")) scale = a.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
         else states.add (a);
-    if (states.isEmpty()) states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps" };
+    if (states.isEmpty())
+        states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps",
+                   "intensity", "scream" };
 
     const double fs = 48000.0;
     const auto loop = testutil::psyLoop (fs, 60.0 / 145.0 * 8.0);   // two bars
@@ -170,6 +181,11 @@ int main (int argc, char** argv)
             k = { .preset = 1, .build = 92.f };
         else if (state == "downlift")
             k = { .preset = 17, .build = 25.f };
+        else if (state == "intensity")
+            k = { .preset = 1, .build = 70.f,
+                  .intensity = { { ids::lowCutIntensity, 50.f }, { ids::noiseIntensity, 25.f }, { ids::stereoIntensity, 0.f } } };
+        else if (state == "scream")
+            k = { .preset = 4, .build = 60.f, .intensity = { { ids::lowResoIntensity, 30.f }, { ids::reverbIntensity, 0.f } } };
 
         BuildAppProcessor proc;
         apply (proc, k);
@@ -188,6 +204,17 @@ int main (int argc, char** argv)
             editor->tick();
             pump (50);
         }
+
+        if (state == "intensity")
+            for (auto* knob : childrenOf<SmallDial> (*editor))
+                if (knob->isVisible() && knob->getHelp().startsWith ("Noise intensity"))
+                {
+                    pointAt (*knob, knob->getLocalBounds().getCentre().toFloat(), false);
+                    knob->mouseEnter ({ juce::Desktop::getInstance().getMainMouseSource(), {}, {}, 0.f, 0.f, 0.f, 0.f, 0.f, knob, knob,
+                                        juce::Time::getCurrentTime(), {}, juce::Time::getCurrentTime(), 1, false });
+                    editor->tick();
+                    pump (50);
+                }
 
         if (state == "bench")
         {

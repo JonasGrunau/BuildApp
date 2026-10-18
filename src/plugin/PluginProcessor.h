@@ -26,6 +26,18 @@ namespace ids
     inline constexpr auto mix = "mix";
     inline constexpr auto preset = "preset";
     inline constexpr auto build = "build";
+    // How much of each timeline lane lands (ba::Intensity), 0..100 %.
+    inline constexpr auto lowCutIntensity = "lowCutIntensity";
+    inline constexpr auto lowResoIntensity = "lowResoIntensity";
+    inline constexpr auto highCutIntensity = "highCutIntensity";
+    inline constexpr auto highResoIntensity = "highResoIntensity";
+    inline constexpr auto pitchIntensity = "pitchIntensity";
+    inline constexpr auto noiseIntensity = "noiseIntensity";
+    inline constexpr auto noisePitchIntensity = "noisePitchIntensity";
+    inline constexpr auto noiseLowCutIntensity = "noiseLowCutIntensity";
+    inline constexpr auto reverbIntensity = "reverbIntensity";
+    inline constexpr auto stereoIntensity = "stereoIntensity";
+    inline constexpr auto levelIntensity = "levelIntensity";
 }
 
 // The knobs of a buildup chain (ba::Buildup), plus a type, a resonance and an
@@ -35,7 +47,9 @@ namespace ids
 // cut types are choices from ba::kLowCutCharacters and ba::kHighCutCharacters.
 // PRESET picks one of ba::kPresets (or Off); BUILD then drives the controls
 // that preset takes over, and the knobs' own values wait underneath until
-// the preset is switched off. Offline renders run the cuts and the pitch in
+// the preset is switched off. One INTENSITY per timeline lane says how much
+// of the preset's path for that control lands (ba::Intensity); they apply to
+// whichever preset is on. Offline renders run the cuts and the pitch in
 // high quality. A host reset (transport stop or jump) clears the reverb tail
 // and the pitch history. Input and output are tapped (mono) for the editor's
 // spectrum.
@@ -77,9 +91,11 @@ public:
     // and as they stand, without it.
     ba::Settings settings() const noexcept;
     ba::Settings ownSettings() const noexcept;
-    // The preset BUILD drives, or nullptr when PRESET is Off; BUILD, 0..1.
+    // The preset BUILD drives, or nullptr when PRESET is Off; BUILD, 0..1;
+    // how much of each of its lanes lands.
     const ba::Preset* activePreset() const noexcept;
     float buildAmount() const noexcept;
+    ba::Intensity intensity() const noexcept;
 
     // ---- For the editor -------------------------------------------------------
     const ba::Tap& inputTap() const noexcept { return inTap; }
@@ -92,7 +108,7 @@ private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     float raw (int i) const noexcept { return rawParams[(size_t) i]->load (std::memory_order_relaxed); }
 
-    std::array<std::atomic<float>*, 18> rawParams {};
+    std::array<std::atomic<float>*, 29> rawParams {};
     ba::Buildup chain;
     ba::Tap inTap, outTap;
     juce::AudioBuffer<float> scratch;   // [0] right channel for a mono input, [1] mono sum for the taps

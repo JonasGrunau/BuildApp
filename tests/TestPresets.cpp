@@ -14,11 +14,12 @@ namespace
 {
     // The loop through a chain whose BUILD follows buildAt (seconds), set
     // once per block as the processor does; noise false keeps the noise off.
-    Stereo run (const Stereo& x, const ba::Preset& p, const std::function<float (double)>& buildAt, double fs, bool noise = true)
+    Stereo run (const Stereo& x, const ba::Preset& p, const std::function<float (double)>& buildAt, double fs, bool noise = true,
+                const ba::Intensity& intensity = {})
     {
         constexpr int block = 480;
         const auto at = [&] (double t) {
-            auto s = ba::applyPreset (p, buildAt (t), ba::Settings {});
+            auto s = ba::applyPreset (p, buildAt (t), ba::Settings {}, intensity);
             if (! noise) s.noise = 0.f;
             return s;
         };
@@ -34,9 +35,39 @@ namespace
         return y;
     }
 
-    Stereo runAt (const Stereo& x, const ba::Preset& p, float build, double fs, bool noise = true)
+    Stereo runAt (const Stereo& x, const ba::Preset& p, float build, double fs, bool noise = true, const ba::Intensity& intensity = {})
     {
-        return run (x, p, [build] (double) { return build; }, fs, noise);
+        return run (x, p, [build] (double) { return build; }, fs, noise, intensity);
+    }
+
+    // The intensity of each row of the timeline, by name.
+    struct IntensityField
+    {
+        const char* name;
+        float ba::Intensity::*field;
+    };
+    constexpr IntensityField kIntensities[] = {
+        { "low cut", &ba::Intensity::lowCut },   { "low reso", &ba::Intensity::lowReso },       { "high cut", &ba::Intensity::highCut },
+        { "high reso", &ba::Intensity::highReso }, { "pitch", &ba::Intensity::pitch },          { "noise", &ba::Intensity::noise },
+        { "noise pitch", &ba::Intensity::noisePitch }, { "noise low cut", &ba::Intensity::noiseLowCut }, { "reverb", &ba::Intensity::reverb },
+        { "stereo", &ba::Intensity::stereo },    { "level", &ba::Intensity::level },
+    };
+
+    ba::Intensity all (float k)
+    {
+        ba::Intensity i;
+        for (const auto& f : kIntensities) i.*f.field = k;
+        return i;
+    }
+
+    // Every control of a Settings with what it is, for comparing two of them.
+    std::vector<std::pair<const char*, float>> controls (const ba::Settings& s)
+    {
+        return { { "low cut", s.lowCut },        { "low type", (float) s.lowCutType },   { "low reso", s.lowCutAuto ? -1.f : s.lowCutReso },
+                 { "high cut", s.highCut },      { "high type", (float) s.highCutType }, { "high reso", s.highCutAuto ? -1.f : s.highCutReso },
+                 { "pitch", s.pitch },           { "noise", s.noise },                   { "noise pitch", s.noisePitch },
+                 { "noise low cut", s.noiseLowCut }, { "reverb", s.reverb },             { "stereo", s.stereo },
+                 { "level", s.makeupDb + s.fadeDb }, { "output level", s.levelDb },      { "mix", s.mix } };
     }
 
     // Every lane with where its control rests (NaN: no rest position, the
@@ -383,4 +414,176 @@ TEST_CASE ("Presets: no two presets take the same path", "[presets]")
         }
     INFO ("closest pair: " << closest);
     CHECK (closest > 0.5);
+}
+
+TEST_CASE ("Presets: a lane's intensity takes it from where its control rests to the preset's path", "[presets]")
+{
+    // 0 is where the control rests by default (the cuts off, no pitch, no
+    // noise, the noise band and its low cut at their defaults, auto
+    // resonance, 0 dB), 1 the preset as designed, halfway is halfway. Pitch
+    // stairs stay on whole semitones. Without a reverb lane only the tail
+    // scales, on top of your own reverb.
+    const auto near = [] (float a, float b) { return std::abs (a - b) < 1e-5f * std::max (1.f, std::abs (b)); };
+    const auto mid = [] (float base, float v) { return base + (v - base) * 0.5f; };
+    const ba::Settings rest;
+    ba::Settings own;
+    own.reverb = 0.1f;
+    for (const auto& p : ba::kPresets)
+    {
+        INFO (p.name);
+        const float reverbBase = p.reverb.driven() ? rest.reverb : own.reverb;
+        for (int i = 0; i <= 40; ++i)
+        {
+            const float build = (float) i / 40.f;
+            INFO ("BUILD " << build);
+            const auto full = ba::applyPreset (p, build, own), none = ba::applyPreset (p, build, own, ba::Intensity::none()),
+                       half = ba::applyPreset (p, build, own, all (0.5f));
+            CHECK (ba::applyPreset (p, build, own, all (1.f)).lowCut == full.lowCut);
+
+            if (p.lowCut.driven())
+            {
+                CHECK ((none.lowCut == rest.lowCut && none.lowCutAuto && none.lowCutType == full.lowCutType));
+                CHECK (near (half.lowCut, mid (rest.lowCut, full.lowCut)));
+            }
+            if (p.highCut.driven())
+            {
+                CHECK ((none.highCut == rest.highCut && none.highCutAuto && none.highCutType == full.highCutType));
+                CHECK (near (half.highCut, mid (rest.highCut, full.highCut)));
+            }
+            for (const bool lowpass : { false, true })
+            {
+                if (! (lowpass ? p.highReso : p.lowReso).driven()) continue;
+                INFO ((lowpass ? "high reso" : "low reso"));
+                auto knobs = lowpass ? half.highCutKnobs() : half.lowCutKnobs();
+                CHECK (! knobs.autoReso);
+                knobs.autoReso = true;
+                const float a = (float) ba::CutFilters::resonance (lowpass, knobs);
+                CHECK (near (lowpass ? half.highCutReso : half.lowCutReso, mid (a, lowpass ? full.highCutReso : full.lowCutReso)));
+            }
+            if (p.pitch.driven())
+            {
+                CHECK (none.pitch == 0.f);
+                if (p.pitch.step > 0.f) CHECK (half.pitch == std::floor (full.pitch * 0.5f + 1e-4f));
+                else CHECK (near (half.pitch, 0.5f * full.pitch));
+            }
+            if (p.noise.driven())
+            {
+                // The noise in amplitude: half is 6 dB down.
+                CHECK (none.noise == 0.f);
+                CHECK (std::abs (ba::map::noiseGain (half.noise) - 0.5 * ba::map::noiseGain (full.noise)) < 1e-6);
+            }
+            const std::pair<const ba::Lane*, float ba::Settings::*> plain[] = {
+                { &p.noisePitch, &ba::Settings::noisePitch },
+                { &p.noiseLowCut, &ba::Settings::noiseLowCut }, { &p.stereo, &ba::Settings::stereo }
+            };
+            for (const auto& [lane, field] : plain)
+            {
+                if (! lane->driven()) continue;
+                CHECK (none.*field == rest.*field);
+                CHECK (near (half.*field, mid (rest.*field, full.*field)));
+            }
+            CHECK (none.reverb == reverbBase);
+            CHECK (near (half.reverb, mid (reverbBase, full.reverb)));
+            CHECK ((none.makeupDb == 0.f && none.fadeDb == 0.f));
+            CHECK (near (half.makeupDb + half.fadeDb, 0.5f * (full.makeupDb + full.fadeDb)));
+        }
+    }
+}
+
+TEST_CASE ("Presets: each intensity moves its own lane and nothing else", "[presets]")
+{
+    ba::Settings own;
+    own.reverb = 0.1f;
+    for (const auto& p : ba::kPresets)
+        for (const auto& f : kIntensities)
+        {
+            INFO (p.name << ", " << f.name << " at 30 %");
+            ba::Intensity k;
+            k.*f.field = 0.3f;
+            bool moved = false;
+            for (int i = 0; i <= 40; ++i)
+            {
+                const float build = (float) i / 40.f;
+                const auto a = controls (ba::applyPreset (p, build, own)), b = controls (ba::applyPreset (p, build, own, k));
+                for (size_t c = 0; c < a.size(); ++c)
+                {
+                    if (std::string (a[c].first) == f.name) moved = moved || a[c].second != b[c].second;
+                    else CHECK (a[c].second == b[c].second);
+                }
+            }
+            // Every lane the timeline shows answers: the preset's own, and the
+            // reverb and level rows every preset ends in (the tail, the fade).
+            const std::pair<const char*, const ba::Lane*> lanesByName[] = {
+                { "low cut", &p.lowCut }, { "low reso", &p.lowReso }, { "high cut", &p.highCut }, { "high reso", &p.highReso },
+                { "pitch", &p.pitch }, { "noise", &p.noise }, { "noise pitch", &p.noisePitch }, { "noise low cut", &p.noiseLowCut },
+                { "stereo", &p.stereo }
+            };
+            bool hasLane = std::string (f.name) == "reverb" || std::string (f.name) == "level";
+            for (const auto& [name, lane] : lanesByName)
+                if (std::string (name) == f.name) hasLane = lane->driven();
+            CHECK (moved == hasLane);
+        }
+}
+
+TEST_CASE ("Presets: at any intensity a preset that rests at BUILD 0 still passes the loop bit for bit", "[presets]")
+{
+    const ba::Intensity mixed { 0.3f, 0.7f, 0.f, 1.f, 0.5f, 0.2f, 0.9f, 0.6f, 0.4f, 0.8f, 0.1f };
+    for (const auto& p : ba::kPresets)
+    {
+        if (! ba::restsAtZero (p)) continue;
+        INFO (p.name);
+        for (const auto& k : { ba::Intensity::none(), all (0.5f), mixed })
+        {
+            const auto s = ba::applyPreset (p, 0.f, ba::Settings {}, k);
+            CHECK ((ba::map::lowCutOff (s.lowCut) && ba::map::highCutOff (s.highCut) && s.pitch == 0.f && s.noise == 0.f
+                    && s.reverb == 0.f && s.stereo == 0.f && s.makeupDb == 0.f && s.fadeDb == 0.f));
+        }
+    }
+    const double fs = 48000.0;
+    const auto x = psyLoop (fs, 1.0);
+    for (const auto& p : ba::kPresets)
+    {
+        if (! ba::restsAtZero (p)) continue;
+        INFO (p.name);
+        const auto y = runAt (x, p, 0.f, fs, true, mixed);
+        CHECK (x.left == y.left);
+        CHECK (x.right == y.right);
+    }
+}
+
+TEST_CASE ("Presets: turning an intensity down glides; what the chain is told never jumps", "[presets][click]")
+{
+    // The chain glides every knob it is told (tested with the stages); here
+    // the knobs themselves move evenly with the intensity, all lanes at once
+    // from 100 % to 0 in steps of 0.1 %, resonance handing over to auto
+    // included (the noise in amplitude, the way the noise source glides it).
+    // Only pitch stairs step, a semitone at a time, as they do along BUILD.
+    constexpr int kSteps = 1000;
+    const auto reso = [] (bool lowpass, const ba::Settings& s) {
+        return (float) ba::CutFilters::resonance (lowpass, lowpass ? s.highCutKnobs() : s.lowCutKnobs());
+    };
+    for (const auto& p : ba::kPresets)
+        for (const float build : { 0.3f, 0.6f, 0.9f })
+        {
+            INFO (p.name << " at BUILD " << build);
+            auto last = ba::applyPreset (p, build, ba::Settings {});
+            float worstKnob = 0.f, worstDb = 0.f, worstPitch = 0.f;
+            for (int i = kSteps - 1; i >= 0; --i)
+            {
+                const auto s = ba::applyPreset (p, build, ba::Settings {}, all ((float) i / kSteps));
+                const auto gain = [] (const ba::Settings& x) { return (float) ba::map::noiseGain (x.noise); };
+                for (const auto& [a, b] : { std::pair { s.lowCut, last.lowCut }, { s.highCut, last.highCut }, { gain (s), gain (last) },
+                                            { s.noisePitch, last.noisePitch }, { s.noiseLowCut, last.noiseLowCut }, { s.reverb, last.reverb },
+                                            { s.stereo, last.stereo }, { reso (false, s), reso (false, last) }, { reso (true, s), reso (true, last) } })
+                    worstKnob = std::max (worstKnob, std::abs (a - b));
+                worstDb = std::max (worstDb, std::abs (s.makeupDb + s.fadeDb - last.makeupDb - last.fadeDb));
+                worstPitch = std::max (worstPitch, std::abs (s.pitch - last.pitch));
+                CHECK ((s.lowCutType == last.lowCutType && s.highCutType == last.highCutType));
+                last = s;
+            }
+            INFO ("largest step: " << worstKnob << " of a knob, " << worstDb << " dB, " << worstPitch << " st");
+            CHECK (worstKnob < 0.003f);
+            CHECK (worstDb < 0.03f);
+            CHECK (worstPitch <= (p.pitch.step > 0.f ? p.pitch.step : 0.015f));
+        }
 }
