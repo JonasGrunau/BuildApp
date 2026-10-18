@@ -27,10 +27,26 @@
 //   switched intensity, then the preset's keys: < to Off and > back (the
 //            intensities stay), > again to the next preset (all back to 100 %);
 //            prints what the intensities were after each step
+//   edit     the preset editor (its window's content) on Full-On Rise at
+//            BUILD 50 %, the mouse on a low cut key (its value box)
+//   edit-fork that key dragged up: the preset became "Full-On Rise copy", unsaved
+//   edit-draw Draw Mode on Stairs: steps drawn into the pitch lane on the 1/16 grid
+//   edit-select a time selection across the low cut and noise rows, the mouse
+//            in it on the noise row (its handles)
+//   edit-bend a low cut segment Option-dragged, mid-bend
+//   edit-new PRESET off: the editor with no lanes yet
+//   edit-small Full-On Rise at the editor's smallest size
 //   bench    times the spectrum and whole-editor paints instead
+//   edit-bench times the preset editor's paints on Full-On Rise
+//   selftest no picture: the user presets end to end (a factory preset copied
+//            by its first edit, undo and redo, the project state and what it
+//            plays, the library, a project from before more factory presets);
+//            prints each check, exits non-zero when one fails
 
 #include "TestUtil.h"
+#include "fx/PresetText.h"
 #include "plugin/Format.h"
+#include "ui/PresetMenu.h"
 #include "plugin/PluginEditor.h"
 #include "plugin/PluginProcessor.h"
 
@@ -101,6 +117,184 @@ namespace
 
     std::vector<TypeSelector*> typeSelectors (juce::Component& root) { return childrenOf<TypeSelector> (root); }   // preset, low cut, high cut
 
+    // A mouse event on c at p (with modifiers; pressed at `down`).
+    juce::MouseEvent mouse (juce::Component& c, juce::Point<float> p, juce::ModifierKeys mods = {}, juce::Point<float> down = {}, bool dragged = false)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return { juce::Desktop::getInstance().getMainMouseSource(), p, mods, 0.f, 0.f, 0.f, 0.f, 0.f, &c, &c, now, down, now, 1, dragged };
+    }
+
+    // The loop through a processor for `seconds`, its output.
+    testutil::Stereo render (BuildAppProcessor& p, const testutil::Stereo& loop, double fs, double seconds)
+    {
+        testutil::Stereo out;
+        juce::AudioBuffer<float> buf (2, 512);
+        juce::MidiBuffer midi;
+        const auto total = (size_t) (seconds * fs);
+        for (size_t s = 0; s < total; s += 512)
+        {
+            const int n = (int) std::min<size_t> (512, total - s);
+            buf.setSize (2, n, false, false, true);
+            for (int i = 0; i < n; ++i)
+            {
+                buf.setSample (0, i, loop.left[(s + (size_t) i) % loop.size()]);
+                buf.setSample (1, i, loop.right[(s + (size_t) i) % loop.size()]);
+            }
+            p.processBlock (buf, midi);
+            for (int i = 0; i < n; ++i)
+            {
+                out.left.push_back (buf.getSample (0, i));
+                out.right.push_back (buf.getSample (1, i));
+            }
+        }
+        return out;
+    }
+
+    void editorState (const juce::String& state, PresetEditorView& view);
+
+    int failures = 0;
+    void check (bool ok, const char* what)
+    {
+        std::printf ("selftest: %s  %s\n", ok ? "ok  " : "FAIL", what);
+        if (! ok) ++failures;
+    }
+
+    // The user presets end to end (see the top).
+    void selfTest (const testutil::Stereo& loop, double fs)
+    {
+        const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("buildapp-selftest-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+        folder.createDirectory();
+       #if JUCE_WINDOWS
+        _putenv_s ("BUILDAPP_PRESET_FOLDER", folder.getFullPathName().toRawUTF8());
+       #else
+        setenv ("BUILDAPP_PRESET_FOLDER", folder.getFullPathName().toRawUTF8(), 1);
+       #endif
+        using P = BuildAppProcessor;
+
+        BuildAppProcessor a;
+        set (a, ids::preset, 1.f);
+        set (a, ids::build, 60.f);
+        a.prepareToPlay (fs, 512);
+        {
+            PresetEditorView view (a);
+            view.setSize (PresetEditorView::kWidth, PresetEditorView::kHeight);
+            view.tick();
+            pump (50);
+            editorState ("edit-fork", view);   // drags a low cut key up
+            const int slot = P::slotOf (a.presetIndex());
+            check (slot >= 0, "the first edit of a factory preset turns PRESET to a user slot");
+            check (slot >= 0 && a.user[slot].name == "Full-On Rise copy" && a.user[slot].unsaved && a.user[slot].copiedFrom == 1,
+                   "the copy is called Full-On Rise copy, unsaved, copied from preset 1");
+            check (slot >= 0 && ba::toText (a.user[slot].path) != ba::toText (ba::kPresets[0]), "the copy has the edit, the factory preset doesn't");
+
+            view.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0));
+            view.tick();
+            check (a.presetIndex() == 1 && ! a.user[slot].used, "undo takes PRESET back to the factory preset and empties the slot");
+            view.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0));
+            view.tick();
+            check (a.presetIndex() == P::presetOf (slot) && a.user[slot].used && a.user[slot].name == "Full-On Rise copy", "redo brings the copy back");
+        }
+        const int slot = P::slotOf (a.presetIndex());
+
+        // The project: another instance loads it and plays it the same.
+        juce::MemoryBlock state;
+        a.getStateInformation (state);
+        BuildAppProcessor b;
+        b.setStateInformation (state.getData(), (int) state.getSize());
+        b.prepareToPlay (fs, 512);
+        a.reset();
+        a.prepareToPlay (fs, 512);
+        check (b.presetIndex() == a.presetIndex() && slot >= 0 && b.user[slot].used && b.user[slot].name == a.user[slot].name
+                   && ba::toText (b.user[slot].path) == ba::toText (a.user[slot].path) && b.user[slot].unsaved,
+               "the project keeps the user preset: slot, name, path, unsaved");
+        const auto ya = render (a, loop, fs, 1.0), yb = render (b, loop, fs, 1.0);
+        check (ya.left == yb.left && ya.right == yb.right, "the reloaded project plays it bit for bit the same");
+        BuildAppProcessor off;
+        off.prepareToPlay (fs, 512);
+        check (ya.left != render (off, loop, fs, 1.0).left, "and that isn't the loop untouched (PRESET off)");
+
+        // The library: save it, another instance lists and loads it.
+        auto saved = a.user[slot];
+        saved.name = "Selftest Rise";
+        saved.file = UserPresets::fileFor (saved.name);
+        saved.savedHash = UserPresets::hashOf (saved);
+        check (UserPresets::write (saved.file, saved), "a preset file is written");
+        a.user.set (slot, saved);
+        check (! a.user[slot].unsaved, "saved, it isn't unsaved any more");
+        const auto library = UserPresets::library();
+        check (library.size() == 1 && library[0].name == "Selftest Rise", "the library lists it by name");
+        BuildAppProcessor c;
+        c.prepareToPlay (fs, 512);
+        check (! library.empty() && presetmenu::load (c, library[0].file, {}), "another instance loads it from the menu");
+        const int cs = P::slotOf (c.presetIndex());
+        check (cs >= 0 && ba::toText (c.user[cs].path) == ba::toText (saved.path) && ! c.user[cs].unsaved && c.user[cs].file == saved.file,
+               "it plays the saved path, saved, from its file");
+        check (presetmenu::freeName (c, "Selftest Rise") == "Selftest Rise 2", "a new name never takes one that's there");
+        const int fresh = presetmenu::newPreset (c);
+        check (fresh >= 0 && fresh != cs && c.user[fresh].name == "New preset" && c.presetIndex() == P::presetOf (fresh) && c.activePreset() != nullptr,
+               "New preset makes an empty one in a free slot and turns it on");
+
+        // A project saved when there were fewer factory presets: its user slot moves up with them.
+        if (auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize()))
+        {
+            auto tree = juce::ValueTree::fromXml (*xml);
+            tree.getChildWithName ("UserPresets").setProperty ("factoryCount", P::kFactory - 1, nullptr);
+            for (auto param : tree)
+                if (param.getProperty ("id").toString() == ids::preset) param.setProperty ("value", a.presetIndex() - 1, nullptr);
+            juce::MemoryBlock old;
+            juce::AudioProcessor::copyXmlToBinary (*tree.createXml(), old);
+            BuildAppProcessor d;
+            d.setStateInformation (old.getData(), (int) old.getSize());
+            check (d.presetIndex() == a.presetIndex() && d.user[slot].used, "a project from before a new factory preset finds its user preset");
+        }
+        folder.deleteRecursively();
+    }
+
+    // The preset editor driven the way the edit* states say (see the top).
+    void editorState (const juce::String& state, PresetEditorView& view)
+    {
+        auto& lanes = view.laneEditor();
+        // Where a lane value sits on a row of the lane editor (as LaneEditor lays it out).
+        const auto spot = [&lanes] (int row, float path, float value, ba::LaneRange r = {}) {
+            const float plotX = LaneEditor::kPad, plotW = (float) lanes.getWidth() - 2.f * LaneEditor::kPad - LaneEditor::kValueW;
+            const float top = lanes.rowTop (row) + 8.f, h = lanes.rowHeight() - 16.f;
+            return juce::Point<float> (plotX + plotW * path * ba::kPathEnd, top + h * (1.f - r.norm (value)));
+        };
+        const auto drag = [&lanes] (juce::Point<float> from, std::initializer_list<juce::Point<float>> path, juce::ModifierKeys mods, bool release) {
+            lanes.mouseMove (mouse (lanes, from, mods));
+            lanes.mouseDown (mouse (lanes, from, mods, from));
+            for (const auto& p : path) lanes.mouseDrag (mouse (lanes, p, mods, from, true));
+            if (release) lanes.mouseUp (mouse (lanes, path.size() > 0 ? *(path.end() - 1) : from, mods, from, path.size() > 0));
+        };
+        const auto key = spot (0, 0.5f, 0.4f);   // Full-On Rise's low cut, its third key
+        if (state == "edit" || state == "edit-small") lanes.mouseMove (mouse (lanes, key));
+        else if (state == "edit-fork")
+        {
+            drag (key, { key.translated (0.f, -6.f), key.translated (0.f, -14.f) }, {}, true);
+            lanes.mouseMove (mouse (lanes, key.translated (0.f, -14.f)));
+        }
+        else if (state == "edit-draw")
+        {
+            lanes.setDrawMode (true);
+            const ba::LaneRange st { 0.f, 12.f };
+            drag (spot (1, 0.3f, 2.f, st), { spot (1, 0.36f, 3.f, st), spot (1, 0.42f, 5.f, st), spot (1, 0.49f, 5.f, st), spot (1, 0.55f, 8.f, st),
+                                             spot (1, 0.61f, 10.f, st) },
+                  {}, true);
+            lanes.mouseMove (mouse (lanes, spot (1, 0.7f, 9.f, st)));
+        }
+        else if (state == "edit-select")
+        {
+            drag (spot (1, 0.25f, 0.95f), { spot (0, 0.5f, 0.95f), spot (0, 0.625f, 0.95f) }, {}, true);
+            lanes.mouseMove (mouse (lanes, spot (1, 0.45f, 0.9f)));
+        }
+        else if (state == "edit-bend")
+        {
+            const auto on = spot (0, 0.65f, 0.46f);
+            drag (on, { on.translated (0.f, -8.f), on.translated (0.f, -18.f) }, juce::ModifierKeys::altModifier, false);
+        }
+        view.tick();
+    }
+
     // Plays `loop` through the processor, ticking the editor about 30 times a second.
     void play (BuildAppProcessor& p, BuildAppEditor& ed, const testutil::Stereo& loop, double fs, double seconds)
     {
@@ -155,7 +349,7 @@ int main (int argc, char** argv)
         else states.add (a);
     if (states.isEmpty())
         states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps",
-                   "intensity", "scream", "switched" };
+                   "intensity", "scream", "switched", "edit", "edit-fork", "edit-draw", "edit-select", "edit-bend", "edit-new", "edit-small" };
 
     const double fs = 48000.0;
     const auto loop = testutil::psyLoop (fs, 60.0 / 145.0 * 8.0);   // two bars
@@ -171,7 +365,8 @@ int main (int argc, char** argv)
             k = { 0.3f, 0.7f, 0.f, 0.f, 0.5f, 0.f, 0.f, 0.f, 100.f };
         else if (state == "types")
             k = { 0.3f, 0.7f, 0.f, 0.f, 0.5f, 0.f, 0.f, 0.f, 100.f, 1, 3, false, 22.f };
-        else if (state == "rise" || state == "steps")
+        else if (state == "rise" || state == "steps" || state == "edit" || state == "edit-fork" || state == "edit-select" || state == "edit-bend"
+                 || state == "edit-small" || state == "edit-bench")
             k = { .preset = 1, .build = 70.f };
         else if (state == "squeeze")
             k = { .preset = 9, .build = 90.f };
@@ -188,6 +383,8 @@ int main (int argc, char** argv)
         else if (state == "intensity" || state == "switched")
             k = { .preset = 1, .build = 70.f,
                   .intensity = { { ids::lowCutIntensity, 50.f }, { ids::noiseIntensity, 25.f }, { ids::stereoIntensity, 0.f } } };
+        else if (state == "edit-draw")
+            k = { .preset = 3, .build = 40.f };
         else if (state == "scream")
             k = { .preset = 4, .build = 60.f, .intensity = { { ids::lowResoIntensity, 30.f }, { ids::reverbIntensity, 0.f } } };
 
@@ -242,6 +439,41 @@ int main (int argc, char** argv)
             press (10.5f, "> next:");
         }
 
+        if (state == "selftest")
+        {
+            selfTest (loop, fs);
+            continue;
+        }
+
+        if (state == "edit-bench")
+        {
+            PresetEditorView view (proc);
+            view.setSize (PresetEditorView::kWidth, PresetEditorView::kHeight);
+            view.tick();
+            pump (50);
+            std::printf ("preset editor paint (2x): %6.2f ms\n", timePaint (view, 20));
+            std::printf ("its lanes alone:          %6.2f ms\n", timePaint (view.laneEditor(), 20));
+            continue;
+        }
+
+        if (state.startsWith ("edit"))
+        {
+            PresetEditorView view (proc);
+            const bool small = state == "edit-small";
+            view.setSize (small ? PresetEditorView::kMinWidth : PresetEditorView::kWidth, small ? PresetEditorView::kMinHeight : PresetEditorView::kHeight);
+            view.tick();
+            pump (50);   // the lane headers come in on the message loop
+            editorState (state, view);
+            pump (50);
+            const auto img = view.createComponentSnapshot (view.getLocalBounds(), true, scale);
+            const auto file = outDir.getChildFile ("buildapp_" + state + ".png");
+            file.deleteFile();
+            juce::FileOutputStream os (file);
+            juce::PNGImageFormat().writeImageToStream (img, os);
+            std::printf ("%s -> %s\n", state.toRawUTF8(), file.getFullPathName().toRawUTF8());
+            continue;
+        }
+
         if (state == "bench")
         {
             std::printf ("whole editor paint: %6.2f ms\n", timePaint (*editor, 20));
@@ -258,5 +490,5 @@ int main (int argc, char** argv)
         juce::PNGImageFormat().writeImageToStream (img, os);
         std::printf ("%s -> %s\n", state.toRawUTF8(), file.getFullPathName().toRawUTF8());
     }
-    return 0;
+    return failures > 0 ? 1 : 0;
 }

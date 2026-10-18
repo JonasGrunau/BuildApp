@@ -419,15 +419,25 @@ void SmallDial::mouseExit (const juce::MouseEvent&)
 
 // ---- TypeSelector ------------------------------------------------------------------
 
-TypeSelector::TypeSelector (juce::RangedAudioParameter& p, juce::String n, std::vector<Choice> c)
-    : param (p), name (std::move (n)), choices (std::move (c)),
-      attachment (p, [this] (float v) { value = v; repaint(); })
+TypeSelector::TypeSelector (juce::RangedAudioParameter& p, juce::String n, std::vector<Choice> c) : TypeSelector (std::move (n), std::move (c))
+{
+    attachment = std::make_unique<juce::ParameterAttachment> (p, [this] (float v) { value = v; repaint(); });
+    attachment->sendInitialUpdate();
+}
+
+TypeSelector::TypeSelector (juce::String n, std::vector<Choice> c) : name (std::move (n)), choices (std::move (c))
 {
     for (const auto& ch : choices) widest = std::max (widest, textWidth (mono (10.5f), ch.name));
     field = widest;
-    attachment.sendInitialUpdate();
     setMouseCursor (juce::MouseCursor::PointingHandCursor);
     setOpaque (true);
+}
+
+void TypeSelector::setIndex (int choice)
+{
+    if (attachment != nullptr || (float) choice == value) return;
+    value = (float) choice;
+    repaint();
 }
 
 void TypeSelector::setDriven (std::optional<int> choice)
@@ -440,8 +450,9 @@ void TypeSelector::setDriven (std::optional<int> choice)
 
 juce::String TypeSelector::getHelp() const
 {
-    const auto& c = choices[(size_t) index()];
-    return c.name + theme::dot + c.help;
+    const int i = index();
+    const auto line = helpOf ? helpOf (i) : choices[(size_t) i].help;
+    return line.isEmpty() ? textOf (i) : textOf (i) + theme::dot + line;
 }
 
 void TypeSelector::choose (int i)
@@ -450,9 +461,26 @@ void TypeSelector::choose (int i)
     if (i != index())
     {
         if (beforeChoose) beforeChoose (i);
-        attachment.setValueAsCompleteGesture ((float) i);
+        if (attachment != nullptr) attachment->setValueAsCompleteGesture ((float) i);
+        else
+        {
+            value = (float) i;
+            repaint();
+            if (onChoose) onChoose (i);
+        }
     }
     if (isMouseOver() && onHover) onHover (this, true);   // the help line follows the choice
+}
+
+void TypeSelector::stepBy (int direction)
+{
+    if (step) step (direction);
+    else
+    {
+        const int n = (int) choices.size();
+        choose ((index() + (direction > 0 ? 1 : n - 1)) % n);
+    }
+    if (isMouseOver() && onHover) onHover (this, true);
 }
 
 float TypeSelector::choiceX() const
@@ -530,7 +558,7 @@ void TypeSelector::paint (juce::Graphics& g)
     }
 
     // Chevron at the right end of the field; none when a preset holds it.
-    const auto text = choices[(size_t) index()].name;
+    const auto text = textOf (index());
     g.setFont (mono (10.5f));
     const float wText = std::min (textWidth (g.getCurrentFont(), text), field);
     g.setColour (col::ink);
@@ -556,9 +584,13 @@ void TypeSelector::mouseDown (const juce::MouseEvent& e)
     if (const auto part = partAt (e.position); part == Part::prev || part == Part::next)
     {
         pressed = part;
-        const int n = (int) choices.size();
-        choose ((index() + (part == Part::next ? 1 : n - 1)) % n);
+        stepBy (part == Part::next ? 1 : -1);
         repaint();
+        return;
+    }
+    if (showMenu)
+    {
+        showMenu (*this);
         return;
     }
     juce::PopupMenu menu;
@@ -593,8 +625,10 @@ void TypeSelector::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseW
     }
     wheel += (std::abs (w.deltaY) > std::abs (w.deltaX) ? w.deltaY : -w.deltaX) * (w.isReversed ? -1.f : 1.f);
     if (std::abs (wheel) < 0.12f) return;
-    choose (index() + (wheel < 0.f ? 1 : -1));
+    const int dir = wheel < 0.f ? 1 : -1;
     wheel = 0.f;
+    if (step) stepBy (dir);
+    else choose (index() + dir);
 }
 
 void TypeSelector::mouseUp (const juce::MouseEvent&)
@@ -678,6 +712,88 @@ void Switch::mouseEnter (const juce::MouseEvent&)
 }
 
 void Switch::mouseExit (const juce::MouseEvent&)
+{
+    repaint();
+    if (onHover) onHover (this, false);
+}
+
+// ---- TextKey -----------------------------------------------------------------------
+
+TextKey::TextKey (juce::String t, juce::String h) : text (std::move (t)), help (std::move (h))
+{
+    setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    setOpaque (true);
+}
+
+void TextKey::setText (juce::String t)
+{
+    if (t == text) return;
+    text = std::move (t);
+    repaint();
+}
+
+void TextKey::setOn (bool o)
+{
+    if (o == on) return;
+    on = o;
+    repaint();
+}
+
+void TextKey::setUsable (bool yes)
+{
+    if (yes == usable) return;
+    usable = yes;
+    setMouseCursor (usable ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    repaint();
+}
+
+int TextKey::idealWidth() const { return (int) std::ceil (textWidth (label (9.f), text.toUpperCase()) + 18.f); }
+
+void TextKey::paint (juce::Graphics& g)
+{
+    g.fillAll (col::sheet);
+    const bool over = usable && isMouseOver();
+    const auto r = getLocalBounds().toFloat().reduced (0.5f).translated (0.f, down && over ? 1.f : 0.f);
+    if (on && usable)
+    {
+        g.setColour (col::ink);
+        g.fillRoundedRectangle (r, kRadius);
+    }
+    else
+    {
+        g.setColour (! usable ? col::hairline : over ? col::ink : col::inkSoft);
+        g.drawRoundedRectangle (r, kRadius, 1.f);
+    }
+    caption (g, text, r, juce::Justification::centred, on && usable ? col::sheet : usable ? col::ink : col::inkFaint, 9.f);
+}
+
+void TextKey::mouseDown (const juce::MouseEvent&)
+{
+    if (! usable) return;
+    down = true;
+    repaint();
+}
+
+void TextKey::mouseDrag (const juce::MouseEvent&)
+{
+    if (down) repaint();   // it lifts while the mouse is off it
+}
+
+void TextKey::mouseUp (const juce::MouseEvent& e)
+{
+    if (! down) return;
+    down = false;
+    repaint();
+    if (usable && getLocalBounds().contains (e.getPosition()) && onClick) onClick();
+}
+
+void TextKey::mouseEnter (const juce::MouseEvent&)
+{
+    repaint();
+    if (onHover) onHover (this, true);
+}
+
+void TextKey::mouseExit (const juce::MouseEvent&)
 {
     repaint();
     if (onHover) onHover (this, false);

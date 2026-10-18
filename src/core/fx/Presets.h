@@ -74,19 +74,35 @@ namespace ba
     // A point on a lane: at BUILD `at` (0..1) the control is at `value` (a knob
     // position 0..1; semitones for pitch, dB for gain). `curve` shapes the
     // segment arriving here: 1 is straight, above 1 starts slow and lands
-    // fast, below 1 the reverse.
+    // fast, below 1 the reverse. `offset` (0 in every factory preset) makes
+    // that bend a stretch of a longer one, u^curve from offset on, so a
+    // segment cut anywhere (a key added on it, an erase or a paste across
+    // it) is still exactly a segment of this kind: editing never bends what
+    // it doesn't touch.
     struct Key
     {
-        float at = 0.f, value = 0.f, curve = 1.f;
+        float at = 0.f, value = 0.f, curve = 1.f, offset = 0.f;
     };
 
+    // How far (0..1) a segment has come u (0..1) of the way along it.
+    inline float bent (float u, float curve, float offset) noexcept
+    {
+        if (curve == 1.f) return u;
+        if (offset <= 0.f) return std::pow (u, curve);
+        // ((offset + u)^curve - offset^curve) / ((offset + 1)^curve - offset^curve), without cancelling
+        const double x = 1.0 / (double) offset;
+        return (float) (std::expm1 ((double) curve * std::log1p ((double) u * x)) / std::expm1 ((double) curve * std::log1p (x)));
+    }
+
     // One control's path over BUILD. It holds its first value before the
-    // first key and its last after the last. `step` > 0 quantises the value
-    // to multiples of it (pitch stairs). Empty: the preset leaves the control
-    // alone.
+    // first key and its last after the last. Two keys at the same `at` are a
+    // step (the value jumps there). `step` > 0 quantises the value to
+    // multiples of it (pitch stairs). Empty: the preset leaves the control
+    // alone. Room for 128 keys: what drawing steps one 1/64 grid wide across
+    // the whole path takes (LaneEdit.h keeps every edit within it).
     struct Lane
     {
-        static constexpr int kMaxKeys = 5;
+        static constexpr int kMaxKeys = 128;
 
         constexpr Lane() = default;
         constexpr Lane (std::initializer_list<Key> list, float quantum = 0.f) : step (quantum)
@@ -114,7 +130,7 @@ namespace ba
                     {
                         const Key &a = keys[i - 1], &z = keys[i];
                         const float u = (b - a.at) / (z.at - a.at);
-                        v = a.value + (z.value - a.value) * (z.curve == 1.f ? u : std::pow (u, z.curve));
+                        v = a.value + (z.value - a.value) * bent (u, z.curve, z.offset);
                         break;
                     }
             }
@@ -140,6 +156,68 @@ namespace ba
         Lane reverb, stereo;
         Lane gain;                  // dB on the wet signal, before dry/wet
     };
+
+    // The lanes a preset can have, in the knob row's order (the timeline's and
+    // the INTENSITY knobs' order). Level is the gain lane.
+    enum class LaneId { lowCut, lowReso, highCut, highReso, pitch, noise, noisePitch, noiseLowCut, reverb, stereo, level };
+    inline constexpr int kLaneCount = 11;
+    inline constexpr std::array<LaneId, kLaneCount> kLaneIds = { LaneId::lowCut, LaneId::lowReso, LaneId::highCut, LaneId::highReso,
+                                                                LaneId::pitch, LaneId::noise, LaneId::noisePitch, LaneId::noiseLowCut,
+                                                                LaneId::reverb, LaneId::stereo, LaneId::level };
+
+    constexpr Lane Preset::*laneMember (LaneId id) noexcept
+    {
+        switch (id)
+        {
+            case LaneId::lowCut:      return &Preset::lowCut;
+            case LaneId::lowReso:     return &Preset::lowReso;
+            case LaneId::highCut:     return &Preset::highCut;
+            case LaneId::highReso:    return &Preset::highReso;
+            case LaneId::pitch:       return &Preset::pitch;
+            case LaneId::noise:       return &Preset::noise;
+            case LaneId::noisePitch:  return &Preset::noisePitch;
+            case LaneId::noiseLowCut: return &Preset::noiseLowCut;
+            case LaneId::reverb:      return &Preset::reverb;
+            case LaneId::stereo:      return &Preset::stereo;
+            case LaneId::level:       return &Preset::gain;
+        }
+        return &Preset::gain;
+    }
+    inline Lane& lane (Preset& p, LaneId id) noexcept { return p.*laneMember (id); }
+    inline const Lane& lane (const Preset& p, LaneId id) noexcept { return p.*laneMember (id); }
+
+    // Whether the preset has the lane: a cut's lane comes with its type (a
+    // cut without keys is a cut held off), the others when they have keys.
+    inline bool hasLane (const Preset& p, LaneId id) noexcept
+    {
+        if (id == LaneId::lowCut) return p.lowCutType >= 0;
+        if (id == LaneId::highCut) return p.highCutType >= 0;
+        return lane (p, id).driven();
+    }
+
+    // A lane's values in its own units: knob positions 0..1, semitones for
+    // pitch, dB for level (the chain takes -24..+24; a lane draws +-12).
+    struct LaneRange
+    {
+        float lo = 0.f, hi = 1.f;
+        constexpr float clamp (float v) const noexcept { return v < lo ? lo : v > hi ? hi : v; }
+        constexpr float norm (float v) const noexcept { return (v - lo) / (hi - lo); }   // 0..1
+        constexpr float value (float n) const noexcept { return lo + n * (hi - lo); }
+    };
+    constexpr LaneRange laneRange (LaneId id) noexcept
+    {
+        if (id == LaneId::pitch) return { 0.f, 12.f };
+        if (id == LaneId::level) return { -12.f, 12.f };
+        return {};
+    }
+
+    // Names in saved text (PresetText.h): never rename one.
+    constexpr const char* laneKey (LaneId id) noexcept
+    {
+        constexpr const char* names[] = { "lowCut", "lowReso", "highCut", "highReso", "pitch", "noise", "noisePitch",
+                                          "noiseLowCut", "reverb", "stereo", "level" };
+        return names[(int) id];
+    }
 
     namespace detail
     {

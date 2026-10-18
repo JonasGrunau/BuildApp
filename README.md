@@ -46,7 +46,7 @@ the footer says what it does.
 
 ### The display
 
-- **A — Build**: the preset menu, a timeline of what the preset does (one lane
+- **A — Build**: the preset menu and **EDIT** (the preset editor, below), a timeline of what the preset does (one lane
   per control it drives, plus the reverb and the level, which carry the fade
   into the tail; each lit in green from where it starts moving up to BUILD,
   then its intensity knob and the value there on the right) and the BUILD
@@ -167,6 +167,57 @@ the core) renders every preset over a 16-bar build (BUILD 0 to 100 %, the fade
 included) plus 4 bars of drop on the built-in loop to WAV and prints loudness,
 brightness and width per bar.
 
+## Your own presets: the preset editor
+
+**EDIT**, next to the preset menu, opens the preset editor in a window of its
+own. It shows the preset that's on, one row per lane, and you draw and bend the
+lanes the way you edit automation in Ableton Live. Every change plays at once.
+
+- **Factory presets stay as they are.** Your first change makes a copy
+  (*Full-On Rise copy*) in a user slot, turns PRESET to it and edits that.
+  With the preset Off, adding a lane starts a new preset.
+- **SAVE AS** names it and keeps it in your library,
+  `~/Documents/BuildApp/Presets` (one `.bapreset` file each). It then shows
+  under **USER** in the preset menu of every project, and the `<` `>` keys walk
+  through your library after the factory presets. **SAVE** writes it again,
+  **REVERT** goes back to what was saved (or to the factory preset it was
+  copied from). A dot marks unsaved changes.
+- **The project keeps every user preset it uses**, so it plays the same on
+  another machine or after the file is gone. PRESET has 16 user slots after the
+  factory presets (*User 1* to *User 16* to the host), so one instance can
+  switch between up to 16 presets of your own, automation included.
+- **The window**: the lanes over BUILD. 0 to 75 % is the path you edit; the
+  tail past it is the same for every preset and shows hatched. Each lane has a
+  header: its cut type and **AUTO** resonance (cuts), **STEPS** (pitch: whole
+  semitones), **×** to take the lane out. **+ LANE** adds a control the preset
+  doesn't take yet. A lane its intensity knob turns down shows what plays,
+  dashed. The badge on the right says whether BUILD 0 is still the drop.
+
+Mouse and keys, as in Live (on Windows Cmd is Ctrl, Option is Alt):
+
+| | |
+|---|---|
+| **B** | Draw Mode on or off; hold B to flip it for one gesture |
+| Drag, in Draw Mode | draws steps one grid cell wide; Shift finer; Cmd (Alt on Windows) draws freehand |
+| Click the line | adds a key there (and drags it) |
+| Double-click off the line | adds a key where you clicked |
+| Click a key | deletes it |
+| Drag a key | moves it, the selected keys with it; it snaps to the grid and to its neighbours' times (Cmd, Alt on Windows: no snap; Shift: one axis, finer). Drag it over a neighbour to remove that one |
+| Drag near a segment, or Shift-drag it | moves the segment; inside a time selection the selected part moves as one |
+| Option-drag a segment | bends it (the curve follows the mouse); Option-double-click straightens it |
+| Drag the background | a time selection, across lanes too. Its handles stretch it (top and bottom, left and right) and skew it (corners); Shift finer, Option both sides |
+| Right-click | Edit Value / Add Value (type it in the knob's words: *400 Hz*, *−3 dB*, *Off*), Insert Shape (sine, triangle, saw, inverse saw, square, ramps, ADSR; over the selection or the grid cell), Simplify Envelope, Cut / Copy / Paste / Duplicate / Delete |
+| Cmd 1 / Cmd 2 | narrower / wider grid: 1/4 to 1/64 of the path (1/16 is a bar of a 16-bar build) |
+| Cmd 3 / Cmd 4 | triplet grid / snap on or off |
+| Cmd Z / Cmd Shift Z | undo / redo; undoing the first change of a copy takes PRESET back to the factory preset |
+| Cmd C, X, V, D, A; Delete; Esc | copy, cut, paste, duplicate, select all; delete the selection; deselect |
+| Cmd S / Cmd Shift S | save / save as |
+| The ruler | drag to scrub BUILD, double-click to drop it to 0 |
+
+The window floats over the DAW while the DAW is in front, and keeps its place
+while the plugin stays open. Your DAW's space bar may not reach the DAW while the
+editor has the keyboard: click the DAW first.
+
 ## How it sounds the way it does
 
 **Filters** (`CharacterFilter.cpp`, `FilterStyles.cpp`, `CutFilters.cpp`).
@@ -267,8 +318,12 @@ cmake --build build-core
 renders the editor to PNGs (rest, build, peak, cuts, types, and the presets
 rise, squeeze, vacuum, sunrise, pumping, tail and downlift, plus intensity and
 scream with lanes turned down, and switched: Off and back, then the next preset,
-printing the intensities after each step) with the built-in loop playing through
-it, no DAW needed. `... <dir> bench` times the paints instead.
+printing the intensities after each step) and the preset editor (edit,
+edit-fork, edit-draw, edit-select, edit-bend, edit-new, edit-small) with the
+built-in loop playing through it, no DAW needed. `... <dir> bench` and
+`edit-bench` time the paints instead; `... <dir> selftest` runs the user
+presets end to end (copy, undo, the project state and what it plays, the
+library in a temporary folder) and exits non-zero if a check fails.
 
 ### Trying it without a DAW
 
@@ -313,10 +368,10 @@ installer is not signed, so SmartScreen asks once (More info > Run anyway).
 
 ```
 src/core/dsp       trapezoidal SVF, polyphase halfbands, smoothers, FFT
-src/core/fx        cut filters, pitch shifter, noise, reverb, the chain, knob mappings, presets
+src/core/fx        cut filters, pitch shifter, noise, reverb, the chain, knob mappings, presets, lane editing
 src/core/analysis  lock-free audio taps, live spectrum
-src/plugin         JUCE processor and editor, number formatting
-src/ui             theme, knobs and meters, spectrum view, build timeline
+src/plugin         JUCE processor and editor, user presets, number formatting
+src/ui             theme, knobs and meters, spectrum view, build timeline, the preset editor
 tests/             Catch2 tests for the core, test signals (incl. the psy loop)
 tools/             offscreen UI snapshot tool, demo host, preset renderer
 packaging/         macOS pkg and Windows installer scripts

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "UserPresets.h"
 #include "analysis/Tap.h"
 #include "fx/Buildup.h"
 #include "fx/Presets.h"
@@ -45,9 +46,10 @@ namespace ids
 // (0..1 for the cuts, noise and reverb; semitones, dB and percent where those
 // are the natural unit); their texts say what they do, in Hz, dB and %. The
 // cut types are choices from ba::kLowCutCharacters and ba::kHighCutCharacters.
-// PRESET picks one of ba::kPresets (or Off); BUILD then drives the controls
-// that preset takes over, and the knobs' own values wait underneath until
-// the preset is switched off. One INTENSITY per timeline lane says how much
+// PRESET picks one of ba::kPresets, one of the user presets after them
+// (UserPresets: copies you edited, your library) or Off; BUILD then drives
+// the controls that preset takes over, and the knobs' own values wait
+// underneath until the preset is switched off. One INTENSITY per timeline lane says how much
 // of the preset's path for that control lands (ba::Intensity); picking
 // another preset in the editor sets them back to 100 %. Offline renders run
 // the cuts and the pitch in high quality. A host reset (transport stop or
@@ -87,12 +89,13 @@ public:
     juce::AudioProcessorValueTreeState apvts;
     juce::RangedAudioParameter& param (const char* id) const { return *apvts.getParameter (id); }
 
-    // The knobs as the chain reads them, the preset's applied (any thread),
-    // and as they stand, without it.
+    // The knobs as the chain runs them, the preset's applied, and as they
+    // stand, without it (message thread; the audio thread reads the user
+    // presets through their bank).
     ba::Settings settings() const noexcept;
     ba::Settings ownSettings() const noexcept;
-    // The preset BUILD drives, or nullptr when PRESET is Off; BUILD, 0..1;
-    // how much of each of its lanes lands.
+    // The preset BUILD drives, or nullptr when PRESET is Off (or on an empty
+    // user slot); BUILD, 0..1; how much of each of its lanes lands.
     const ba::Preset* activePreset() const noexcept;
     float buildAmount() const noexcept;
     ba::Intensity intensity() const noexcept;
@@ -102,6 +105,24 @@ public:
     // them as they were. Host automation of PRESET leaves them alone: they
     // have automation of their own.
     void presetPicked (int i);
+    // User slot `i`'s preset was swapped for another (a library pick in its
+    // place): every intensity back to 100 %, as for a newly picked preset.
+    void presetReplaced (int i);
+
+    // ---- Presets ----------------------------------------------------------------
+    // PRESET's choices: 0 Off, 1..kFactory the factory presets, then one per
+    // user slot. The user slots' names and paths are in `user`.
+    static constexpr int kFactory = (int) std::size (ba::kPresets);
+    static int slotOf (int preset) noexcept { return preset > kFactory && preset <= kFactory + UserPresets::kSlots ? preset - kFactory - 1 : -1; }
+    static int presetOf (int slot) noexcept { return kFactory + 1 + slot; }
+    int presetIndex() const noexcept;
+    juce::String presetName (int preset) const;   // what the menu shows
+    juce::String presetHelp (int preset) const;
+    // Turns PRESET to `preset` as one gesture. Picking one the way the user
+    // does also runs presetPicked; a copy made of the one that's on doesn't.
+    void selectPreset (int preset, bool picked = true);
+    UserPresets user;
+    juce::Rectangle<int> presetEditorBounds;   // where the preset editor window was (message thread)
 
     // ---- For the editor -------------------------------------------------------
     const ba::Tap& inputTap() const noexcept { return inTap; }
@@ -113,6 +134,7 @@ public:
 private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
     float raw (int i) const noexcept { return rawParams[(size_t) i]->load (std::memory_order_relaxed); }
+    ba::Settings audioSettings() noexcept;   // settings() for the audio thread
 
     std::array<std::atomic<float>*, 29> rawParams {};
     ba::Buildup chain;

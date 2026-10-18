@@ -39,6 +39,9 @@ add_library(buildapp_core STATIC
     src/core/fx/NoiseSource.cpp
     src/core/fx/Reverb.cpp
     src/core/fx/Buildup.cpp
+    src/core/fx/LaneEdit.cpp
+    src/core/fx/PresetText.cpp
+    src/core/fx/PresetBank.cpp
     src/core/analysis/Spectrum.cpp
 )
 target_include_directories(buildapp_core PUBLIC src/core)
@@ -81,11 +84,15 @@ if(BUILDAPP_BUILD_PLUGIN)
     # Listed once, used by the plugin and the dev tools.
     set(BUILDAPP_UI_SOURCES
         src/plugin/PluginProcessor.cpp
+        src/plugin/UserPresets.cpp
         src/plugin/PluginEditor.cpp
         src/ui/Theme.cpp
         src/ui/Controls.cpp
         src/ui/SpectrumView.cpp
-        src/ui/BuildTimeline.cpp)
+        src/ui/BuildTimeline.cpp
+        src/ui/LaneEditor.cpp
+        src/ui/PresetMenu.cpp
+        src/ui/PresetEditor.cpp)
 
     target_sources(BuildApp PRIVATE ${BUILDAPP_UI_SOURCES})
     target_include_directories(BuildApp PRIVATE src)
@@ -147,9 +154,12 @@ if(BUILDAPP_BUILD_TESTS)
         tests/TestFilters.cpp
         tests/TestPitch.cpp
         tests/TestChain.cpp
-        tests/TestPresets.cpp)
+        tests/TestPresets.cpp
+        tests/TestLaneEdit.cpp
+        tests/TestPresetBank.cpp)
+    find_package(Threads REQUIRED)
     target_include_directories(buildapp_tests PRIVATE tests)
-    target_link_libraries(buildapp_tests PRIVATE buildapp_core Catch2::Catch2WithMain)
+    target_link_libraries(buildapp_tests PRIVATE buildapp_core Catch2::Catch2WithMain Threads::Threads)
 
     # Dev tool: every preset's buildup rendered to WAV, with per-bar loudness,
     # brightness and width (how the presets were tuned).

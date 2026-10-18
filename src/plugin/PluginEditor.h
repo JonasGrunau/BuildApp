@@ -3,13 +3,15 @@
 #include "PluginProcessor.h"
 #include "ui/BuildTimeline.h"
 #include "ui/Controls.h"
+#include "ui/PresetEditor.h"
 #include "ui/SpectrumView.h"
 
 // One sheet, laid out at 880 x 730 and scaled as a whole when the window is
 // resized (fixed aspect); with no preset the build band folds away to its
 // menu and the sheet is 880 x 548:
 //   header   wordmark, input and output meters
-//   A        build: the preset menu, the timeline of what it drives (a lane
+//   A        build: the preset menu (with your library) and EDIT, which opens
+//            the preset editor window, the timeline of what it drives (a lane
 //            per control, each with its intensity knob), the BUILD knob
 //   B        spectrum with the cuts and the noise band; the cut types in its header
 //   C..G     filter (cuts, their resonance and auto switches), pitch, noise,
@@ -33,6 +35,8 @@ public:
 
     void tick();   // one UI update (timer; the snapshot tool calls it directly)
     void showHelp (const juce::String& line);   // empty: back to the default line
+    void openPresetEditor (bool open);          // the EDIT key
+    PresetEditorWindow* presetEditor() { return presetWindow.get(); }
 
 private:
     struct Sheet : juce::Component
@@ -75,6 +79,8 @@ private:
     Dial build, lowCut, lowReso, highCut, highReso, pitch, noise, noisePitch, noiseLowCut, reverb, stereo, level, mix;
     TypeSelector preset, lowCutType, highCutType;
     Switch lowAuto, highAuto;
+    TextKey edit;
+    std::unique_ptr<PresetEditorWindow> presetWindow;
 
     juce::String help, rateText;
     bool helpIsDefault = true, open = true;

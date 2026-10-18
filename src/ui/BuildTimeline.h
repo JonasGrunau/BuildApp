@@ -76,6 +76,7 @@ private:
     std::array<std::unique_ptr<SmallDial>, kLanes> knobs;
     const ba::Preset* shownPreset = nullptr;
     float shownBuild = -1.f, shownReverb = -1.f;
+    uint32_t shownGen = 0;
     ba::Intensity shownIntensity;
     bool dragging = false;
 };

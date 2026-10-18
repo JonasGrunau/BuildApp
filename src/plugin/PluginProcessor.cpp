@@ -40,6 +40,7 @@ namespace
     {
         juce::StringArray names (kOff);
         for (const auto& p : ba::kPresets) names.add (p.name);
+        for (int i = 1; i <= UserPresets::kSlots; ++i) names.add ("User " + juce::String (i));
         return names;
     }
 } // namespace
@@ -130,7 +131,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout BuildAppProcessor::createLay
               .withStringFromValueFunction ([] (float v, int) { return fmt::fixed (v, 0) + " %"; })
               .withValueFromStringFunction ([] (const String& t) { return (float) fmt::parse (t); })));
 
-    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::preset, 3 }, "Preset", presetNames(), 0));
+    // Version 5: the user slots after the factory presets.
+    layout.add (std::make_unique<AudioParameterChoice> (ParameterID { ids::preset, 5 }, "Preset", presetNames(), 0));
     layout.add (std::make_unique<AudioParameterFloat> (
         ParameterID { ids::build, 4 }, "Build", unit (0.f, 100.f), 0.f,
         Attr().withLabel ("%")
@@ -160,6 +162,14 @@ ba::Settings BuildAppProcessor::settings() const noexcept
     return s;
 }
 
+ba::Settings BuildAppProcessor::audioSettings() noexcept
+{
+    const auto s = ownSettings();
+    const int i = presetIndex();
+    const ba::Preset* p = i >= 1 && i <= kFactory ? &ba::kPresets[(size_t) i - 1] : user.forAudio (slotOf (i));
+    return p != nullptr ? ba::applyPreset (*p, buildAmount(), s, intensity()) : s;
+}
+
 ba::Intensity BuildAppProcessor::intensity() const noexcept
 {
     const auto at = [this] (int i) { return juce::jlimit (0.f, 1.f, raw (i) / 100.f); };
@@ -173,6 +183,11 @@ void BuildAppProcessor::presetPicked (int i)
     // Whatever is on now (picked here, loaded or automated) is what they were set on.
     if (const int now = juce::roundToInt (raw (Raw::preset)); now != 0) intensitiesOf = now;
     if (i == 0 || i == intensitiesOf) return;
+    presetReplaced (i);
+}
+
+void BuildAppProcessor::presetReplaced (int i)
+{
     intensitiesOf = i;
     for (int r = Raw::lowCutIntensity; r <= Raw::levelIntensity; ++r)
     {
@@ -207,10 +222,39 @@ ba::Settings BuildAppProcessor::ownSettings() const noexcept
     return s;
 }
 
+int BuildAppProcessor::presetIndex() const noexcept { return juce::roundToInt (raw (Raw::preset)); }
+
 const ba::Preset* BuildAppProcessor::activePreset() const noexcept
 {
-    const int i = juce::roundToInt (raw (Raw::preset));
-    return i >= 1 && i <= (int) std::size (ba::kPresets) ? &ba::kPresets[(size_t) i - 1] : nullptr;
+    const int i = presetIndex();
+    if (i >= 1 && i <= kFactory) return &ba::kPresets[(size_t) i - 1];
+    if (const int slot = slotOf (i); slot >= 0 && user[slot].used) return &user[slot].path;
+    return nullptr;
+}
+
+juce::String BuildAppProcessor::presetName (int i) const
+{
+    if (i >= 1 && i <= kFactory) return ba::kPresets[(size_t) i - 1].name;
+    if (const int slot = slotOf (i); slot >= 0) return user[slot].used ? user[slot].name : "User " + juce::String (slot + 1);
+    return kOff;
+}
+
+juce::String BuildAppProcessor::presetHelp (int i) const
+{
+    if (i >= 1 && i <= kFactory) return ba::kPresets[(size_t) i - 1].help;
+    if (const int slot = slotOf (i); slot >= 0)
+        return user[slot].used ? user[slot].help : juce::String ("An empty user slot: it plays nothing until a preset of yours is in it.");
+    return "No preset: every knob is yours, and BUILD does nothing.";
+}
+
+void BuildAppProcessor::selectPreset (int i, bool picked)
+{
+    if (picked) presetPicked (i);
+    user.touch (slotOf (i));
+    auto& p = param (ids::preset);
+    p.beginChangeGesture();
+    p.setValueNotifyingHost (p.convertTo0to1 ((float) i));
+    p.endChangeGesture();
 }
 
 float BuildAppProcessor::buildAmount() const noexcept { return juce::jlimit (0.f, 1.f, raw (Raw::build) / 100.f); }
@@ -228,7 +272,7 @@ bool BuildAppProcessor::isBusesLayoutSupported (const BusesLayout& layouts) cons
 void BuildAppProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     currentRate.store (sampleRate, std::memory_order_relaxed);
-    chain.set (settings());
+    chain.set (audioSettings());
     chain.prepare (sampleRate, std::max (1, samplesPerBlock));
     scratch.setSize (2, std::max (1, samplesPerBlock));
 }
@@ -257,7 +301,7 @@ void BuildAppProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     };
 
     tap (inTap, inPeak);
-    chain.set (settings());
+    chain.set (audioSettings());
     chain.process (left, right, n);
     tap (outTap, outPeak);
 
@@ -276,6 +320,7 @@ void BuildAppProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     state.setProperty (kIntensitiesOf, intensitiesOf.load(), nullptr);
+    user.saveInto (state);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -285,8 +330,19 @@ void BuildAppProcessor::setStateInformation (const void* data, int sizeInBytes)
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
         {
+            auto state = juce::ValueTree::fromXml (*xml);
             intensitiesOf = xml->getIntAttribute (kIntensitiesOf, 0);
-            apvts.replaceState (juce::ValueTree::fromXml (*xml));
+            user.loadFrom (state);
+            apvts.replaceState (state);
+            // A project saved with fewer factory presets: its user slots were
+            // right after them, so they move up with the presets appended since.
+            const int saved = UserPresets::factoryCountIn (state, kFactory);
+            if (const int i = presetIndex(); saved != kFactory && i > saved)
+            {
+                auto& p = param (ids::preset);
+                p.setValueNotifyingHost (p.convertTo0to1 ((float) (i - saved + kFactory)));
+            }
+            if (saved != kFactory && intensitiesOf > saved) intensitiesOf += kFactory - saved;
         }
 }
 

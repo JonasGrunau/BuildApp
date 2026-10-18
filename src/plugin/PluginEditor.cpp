@@ -1,6 +1,7 @@
 #include "PluginEditor.h"
 
 #include "fx/CutFilters.h"
+#include "ui/PresetMenu.h"
 
 #include <vector>
 
@@ -35,14 +36,6 @@ namespace
             out.push_back ({ c.name, c.help, c.build ? "Buildup" : "Breakdown" });
         return out;
     }
-
-    std::vector<TypeSelector::Choice> presetChoices()
-    {
-        std::vector<TypeSelector::Choice> out { { "Off", "No preset: every knob is yours, and BUILD does nothing.", {} } };
-        for (const auto& p : ba::kPresets)
-            out.push_back ({ p.name, p.help, p.section });
-        return out;
-    }
 } // namespace
 
 float BuildAppEditor::cellWidth()
@@ -75,18 +68,19 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
       stereo (p.param (ids::stereo), "Stereo", "100 % is the full image; turning it up narrows it towards mono."),
       level (p.param (ids::level), "Level", juce::String (juce::CharPointer_UTF8 ("Output gain, \xe2\x88\x92" "36 to +12 dB."))),
       mix (p.param (ids::mix), "Dry/Wet", "The untouched input against the whole effect."),
-      preset (p.param (ids::preset), "Preset", presetChoices()),
+      preset (p.param (ids::preset), "Preset", presetmenu::choices()),
       lowCutType (p.param (ids::lowCutType), "Low cut", typeChoices (false)),
       highCutType (p.param (ids::highCutType), "High cut", typeChoices (true)),
       lowAuto (p.param (ids::lowCutAuto), "Auto", "Auto resonance for the low cut: on, it rises as the cut climbs, shaped by its type; off, the Reso knob sets it."),
-      highAuto (p.param (ids::highCutAuto), "Auto", "Auto resonance for the high cut: on, it follows the sweep, shaped by its type; off, the Reso knob sets it.")
+      highAuto (p.param (ids::highCutAuto), "Auto", "Auto resonance for the high cut: on, it follows the sweep, shaped by its type; off, the Reso knob sets it."),
+      edit ("Edit", "Opens the preset editor: draw and bend every lane of the preset, then keep it in your library.")
 {
     setLookAndFeel (&lnf);
     addAndMakeVisible (sheet);
     for (juce::Component* c : std::initializer_list<juce::Component*> { &inMeter, &outMeter, &timeline, &build, &preset, &spectrum,
                                                                        &lowCut, &lowReso, &highCut, &highReso,
                                                                        &pitch, &noise, &noisePitch, &noiseLowCut, &reverb, &stereo, &level, &mix,
-                                                                       &lowCutType, &highCutType, &lowAuto, &highAuto })
+                                                                       &lowCutType, &highCutType, &lowAuto, &highAuto, &edit })
         sheet.addAndMakeVisible (c);
 
     highCut.setRing (Dial::Ring::build, true);
@@ -109,7 +103,10 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
     }
     preset.setSteppers (true);
     preset.onHover = [this] (TypeSelector* sel, bool on) { showHelp (on ? sel->getHelp() : juce::String()); };
-    preset.beforeChoose = [this] (int i) { proc.presetPicked (i); };   // another preset starts at full intensity
+    // The menu with your library; picking another preset starts it at full intensity (selectPreset).
+    presetmenu::attach (preset, proc, [this] (const juce::String& line) { showHelp (line); }, [this] { openPresetEditor (true); });
+    edit.onClick = [this] { openPresetEditor (presetWindow == nullptr); };
+    edit.onHover = [this] (TextKey* k, bool on) { showHelp (on ? k->getHelp() : juce::String()); };
     // One field width for the three menus, room for the longest name in any of
     // them; the preset's field starts where the low cut's does, right under it.
     const float field = std::max ({ preset.widestChoice(), lowCutType.widestChoice(), highCutType.widestChoice() });
@@ -136,7 +133,25 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
 BuildAppEditor::~BuildAppEditor()
 {
     stopTimer();
+    presetWindow.reset();
     setLookAndFeel (nullptr);
+}
+
+void BuildAppEditor::openPresetEditor (bool openIt)
+{
+    if (! openIt)
+    {
+        presetWindow.reset();
+        edit.setOn (false);
+        return;
+    }
+    if (presetWindow == nullptr)
+        presetWindow = std::make_unique<PresetEditorWindow> (proc, [safe = juce::Component::SafePointer<BuildAppEditor> (this)] {
+            // Its own close button: not from inside its callback.
+            juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->openPresetEditor (false); });
+        });
+    presetWindow->toFront (true);
+    edit.setOn (true);
 }
 
 void BuildAppEditor::resized()
@@ -161,6 +176,7 @@ void BuildAppEditor::layout()
     inMeter.setBounds (560, 24, 136, 26);
     outMeter.setBounds (720, 24, 136, 26);
     preset.setBounds (150, (int) kBuildTagY - 2, preset.idealWidth(), 17);
+    edit.setBounds (preset.getRight() + 10, (int) kBuildTagY - 2, edit.idealWidth(), 17);
     timeline.setBounds (24, (int) kBuildY, 680, (int) kBuildH);
     // Its value on the timeline's axis line (the disc, 4 px, the name's 13 px, then the value).
     const float buildTop = kBuildY + kBuildH - BuildTimeline::kAxis + 4.f - (kBuildDisc + 17.f);
@@ -251,14 +267,19 @@ void BuildAppEditor::showHelp (const juce::String& line)
 
 juce::String BuildAppEditor::defaultHelp() const
 {
-    if (const auto* p = proc.activePreset()) return juce::String (p->name) + theme::dot + p->help;
+    const int i = proc.presetIndex();
+    if (proc.activePreset() != nullptr)
+    {
+        const auto line = proc.presetHelp (i);
+        return line.isEmpty() ? proc.presetName (i) : proc.presetName (i) + theme::dot + line;
+    }
     return kDefaultHelp;
 }
 
 juce::String BuildAppEditor::lockedHelp() const
 {
-    const auto* p = proc.activePreset();
-    return "Driven by BUILD in " + juce::String (p != nullptr ? p->name : "the preset") + kDash + "pick Off in the preset menu to take it back.";
+    const auto name = proc.activePreset() != nullptr ? proc.presetName (proc.presetIndex()) : juce::String ("the preset");
+    return "Driven by BUILD in " + name + kDash + "pick Off in the preset menu to take it back, or EDIT it.";
 }
 
 void BuildAppEditor::Sheet::paint (juce::Graphics& g)
@@ -344,6 +365,7 @@ void BuildAppEditor::Sheet::paint (juce::Graphics& g)
 
 void BuildAppEditor::tick()
 {
+    if (presetWindow != nullptr) presetWindow->tick();
     inMeter.push (proc.takePeak (false));
     outMeter.push (proc.takePeak (true));
     spectrum.refresh();

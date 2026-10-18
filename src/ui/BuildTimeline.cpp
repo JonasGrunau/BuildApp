@@ -128,9 +128,11 @@ void BuildTimeline::refresh()
     const auto intensity = proc.intensity();
     const bool sameIntensity = std::all_of (std::begin (kIntensityOf), std::end (kIntensityOf),
                                             [&] (auto f) { return std::abs (intensity.*f - shownIntensity.*f) < 1e-6f; });
-    if (preset == shownPreset && std::abs (build - shownBuild) < 1e-6f && reverb == shownReverb && sameIntensity) return;
-    if (preset != shownPreset)
+    const auto gen = proc.user.generation();   // a user preset edited in place: same pointer, other lanes
+    if (preset == shownPreset && gen == shownGen && std::abs (build - shownBuild) < 1e-6f && reverb == shownReverb && sameIntensity) return;
+    if (preset != shownPreset || gen != shownGen)
     {
+        shownGen = gen;
         setMouseCursor (preset != nullptr ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
         shownPreset = preset;
         placeKnobs();

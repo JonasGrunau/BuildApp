@@ -129,6 +129,12 @@ private:
 // field keeps them in one place whatever the choice. A preset can drive it: then it shows the
 // preset's choice, without the chevron, its keys dimmed, and can't be changed.
 // beforeChoose runs when the user picks another choice, before it is set.
+//
+// Without a parameter (a lane header's cut type in the preset editor) it
+// shows what setIndex says and tells onChoose what the user picked. The
+// preset menu replaces parts: nameOf / helpOf give a choice its own words (a
+// user slot shows its preset's name), showMenu opens a menu of its own (the
+// library), and step walks the < > keys and the wheel its own way.
 class TypeSelector : public juce::Component
 {
 public:
@@ -138,6 +144,16 @@ public:
     };
 
     TypeSelector (juce::RangedAudioParameter& p, juce::String name, std::vector<Choice> choices);
+    TypeSelector (juce::String name, std::vector<Choice> choices);
+
+    void setIndex (int choice);                 // without a parameter: what it shows
+    int current() const { return index(); }
+    void pick (int choice) { choose (choice); }   // as if the user chose it
+    void setMenuOpen (bool on) { open = on; repaint(); }   // a menu of showMenu's is up
+    std::function<void (int choice)> onChoose;  // without a parameter: the user's choice
+    std::function<juce::String (int choice)> nameOf, helpOf;
+    std::function<void (TypeSelector&)> showMenu;
+    std::function<void (int direction)> step;
 
     juce::String getHelp() const;
     void setDriven (std::optional<int> choice);
@@ -165,15 +181,16 @@ private:
     enum class Part { none, prev, next, menu };
 
     int index() const { return juce::jlimit (0, (int) choices.size() - 1, driven.value_or (juce::roundToInt (value))); }
+    juce::String textOf (int i) const { return nameOf ? nameOf (i) : choices[(size_t) i].name; }
     void choose (int i);
+    void stepBy (int direction);
     juce::Rectangle<float> stepKey (int direction) const;   // -1: <, +1: >
     Part partAt (juce::Point<float> p) const;
     void setHover (Part p);
 
-    juce::RangedAudioParameter& param;
     juce::String name;
     std::vector<Choice> choices;
-    juce::ParameterAttachment attachment;
+    std::unique_ptr<juce::ParameterAttachment> attachment;   // none without a parameter
     float value = 0.f, wheel = 0.f, widest = 0.f, fieldX = 0.f, field = 0.f;   // field: the choice text's room, >= widest
     std::optional<int> driven;
     bool open = false, steppers = false;
@@ -206,6 +223,36 @@ private:
     juce::ParameterAttachment attachment;
     float value = 0.f;
     std::optional<bool> driven;
+};
+
+// A key with a word on it, like the demo host's: outlined in inkSoft, ink on
+// hover, inked (sheet-coloured text) while on, a pixel down while pressed;
+// greyed out and deaf while it can't be used. Clicks on release inside.
+class TextKey : public juce::Component
+{
+public:
+    explicit TextKey (juce::String text, juce::String help = {});
+
+    void setText (juce::String t);
+    void setOn (bool on);
+    bool isOn() const { return on; }
+    void setUsable (bool yes);
+    void setHelp (juce::String line) { help = std::move (line); }
+    juce::String getHelp() const { return help; }
+    int idealWidth() const;   // the word and 9 px a side
+    std::function<void()> onClick;
+    std::function<void (TextKey*, bool)> onHover;
+
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseEnter (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+
+private:
+    juce::String text, help;
+    bool on = false, usable = true, down = false;
 };
 
 // Horizontal level meter, -60..0 dBFS, with a peak tick.
