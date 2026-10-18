@@ -24,9 +24,13 @@
 //            0 % intensity, the mouse on the noise's knob (its help in the footer)
 //   scream   preset Acid Scream at BUILD 60 %, its resonance at 30 % intensity
 //            (resting on auto resonance) and the reverb at 0 %
+//   switched intensity, then the preset's keys: < to Off and > back (the
+//            intensities stay), > again to the next preset (all back to 100 %);
+//            prints what the intensities were after each step
 //   bench    times the spectrum and whole-editor paints instead
 
 #include "TestUtil.h"
+#include "plugin/Format.h"
 #include "plugin/PluginEditor.h"
 #include "plugin/PluginProcessor.h"
 
@@ -151,7 +155,7 @@ int main (int argc, char** argv)
         else states.add (a);
     if (states.isEmpty())
         states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps",
-                   "intensity", "scream" };
+                   "intensity", "scream", "switched" };
 
     const double fs = 48000.0;
     const auto loop = testutil::psyLoop (fs, 60.0 / 145.0 * 8.0);   // two bars
@@ -181,7 +185,7 @@ int main (int argc, char** argv)
             k = { .preset = 1, .build = 92.f };
         else if (state == "downlift")
             k = { .preset = 17, .build = 25.f };
-        else if (state == "intensity")
+        else if (state == "intensity" || state == "switched")
             k = { .preset = 1, .build = 70.f,
                   .intensity = { { ids::lowCutIntensity, 50.f }, { ids::noiseIntensity, 25.f }, { ids::stereoIntensity, 0.f } } };
         else if (state == "scream")
@@ -215,6 +219,28 @@ int main (int argc, char** argv)
                     editor->tick();
                     pump (50);
                 }
+
+        if (state == "switched")
+        {
+            const auto intensities = [&] {
+                const auto now = proc.intensity();
+                return fmt::fixed (now.lowCut * 100.0, 0) + "/" + fmt::fixed (now.noise * 100.0, 0) + "/" + fmt::fixed (now.stereo * 100.0, 0)
+                       + " % (low cut/noise/stereo)";
+            };
+            auto* sel = typeSelectors (*editor)[0];
+            const auto press = [&] (float fromRight, const char* what) {
+                pointAt (*sel, { (float) sel->getWidth() - fromRight, 8.5f }, true);
+                sel->mouseUp ({ juce::Desktop::getInstance().getMainMouseSource(), {}, {}, 0.f, 0.f, 0.f, 0.f, 0.f, sel, sel,
+                                juce::Time::getCurrentTime(), {}, juce::Time::getCurrentTime(), 1, false });
+                play (proc, *editor, loop, fs, 0.5);
+                pump (50);
+                std::printf ("switched: %-14s preset %d, %s\n", what, juce::roundToInt (proc.param (ids::preset).convertFrom0to1 (proc.param (ids::preset).getValue())),
+                             intensities().toRawUTF8());
+            };
+            press (26.5f, "< to Off:");
+            press (10.5f, "> back:");
+            press (10.5f, "> next:");
+        }
 
         if (state == "bench")
         {

@@ -447,7 +447,11 @@ juce::String TypeSelector::getHelp() const
 void TypeSelector::choose (int i)
 {
     i = juce::jlimit (0, (int) choices.size() - 1, i);
-    if (i != index()) attachment.setValueAsCompleteGesture ((float) i);
+    if (i != index())
+    {
+        if (beforeChoose) beforeChoose (i);
+        attachment.setValueAsCompleteGesture ((float) i);
+    }
     if (isMouseOver() && onHover) onHover (this, true);   // the help line follows the choice
 }
 

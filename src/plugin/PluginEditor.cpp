@@ -109,6 +109,7 @@ BuildAppEditor::BuildAppEditor (BuildAppProcessor& p)
     }
     preset.setSteppers (true);
     preset.onHover = [this] (TypeSelector* sel, bool on) { showHelp (on ? sel->getHelp() : juce::String()); };
+    preset.beforeChoose = [this] (int i) { proc.presetPicked (i); };   // another preset starts at full intensity
     // One field width for the three menus, room for the longest name in any of
     // them; the preset's field starts where the low cut's does, right under it.
     const float field = std::max ({ preset.widestChoice(), lowCutType.widestChoice(), highCutType.widestChoice() });

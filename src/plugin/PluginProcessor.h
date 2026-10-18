@@ -48,11 +48,11 @@ namespace ids
 // PRESET picks one of ba::kPresets (or Off); BUILD then drives the controls
 // that preset takes over, and the knobs' own values wait underneath until
 // the preset is switched off. One INTENSITY per timeline lane says how much
-// of the preset's path for that control lands (ba::Intensity); they apply to
-// whichever preset is on. Offline renders run the cuts and the pitch in
-// high quality. A host reset (transport stop or jump) clears the reverb tail
-// and the pitch history. Input and output are tapped (mono) for the editor's
-// spectrum.
+// of the preset's path for that control lands (ba::Intensity); picking
+// another preset in the editor sets them back to 100 %. Offline renders run
+// the cuts and the pitch in high quality. A host reset (transport stop or
+// jump) clears the reverb tail and the pitch history. Input and output are
+// tapped (mono) for the editor's spectrum.
 class BuildAppProcessor : public juce::AudioProcessor
 {
 public:
@@ -96,6 +96,12 @@ public:
     const ba::Preset* activePreset() const noexcept;
     float buildAmount() const noexcept;
     ba::Intensity intensity() const noexcept;
+    // The user is picking PRESET i (0 = Off) in the editor (message thread):
+    // a preset other than the one the intensities were set on starts with
+    // every lane at 100 %. Off keeps them, so switching it off and back finds
+    // them as they were. Host automation of PRESET leaves them alone: they
+    // have automation of their own.
+    void presetPicked (int i);
 
     // ---- For the editor -------------------------------------------------------
     const ba::Tap& inputTap() const noexcept { return inTap; }
@@ -114,6 +120,7 @@ private:
     juce::AudioBuffer<float> scratch;   // [0] right channel for a mono input, [1] mono sum for the taps
     std::atomic<double> currentRate { 48000.0 };
     std::atomic<float> inPeak { 0.f }, outPeak { 0.f };
+    std::atomic<int> intensitiesOf { 0 };   // the preset (1-based) the intensities were set on, 0: none yet; saved with the state
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (BuildAppProcessor)
 };

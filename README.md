@@ -103,8 +103,10 @@ it. At 0 %:
 | Stereo | the full image |
 | Level | no makeup gain and no fade into the tail |
 
-The intensities are parameters (automatable, saved with the project) and apply
-to whichever preset is on. At 100 % a preset runs exactly as designed; a preset
+The intensities are parameters (automatable, saved with the project). Picking
+another preset sets them all back to 100 %; switching to Off and back to the
+same preset keeps them. Automating the preset doesn't touch them, so their own
+automation plays as recorded. At 100 % a preset runs exactly as designed; a preset
 that rests at BUILD 0 still does at any intensity, so the drop stays bit-exact.
 Each preset's makeup gain was tuned for its full path: turn a cut down and you
 may want the Level lane down a little too. Drag a knob up or down (Shift for
@@ -264,8 +266,9 @@ cmake --build build-core
 `build/buildapp_snapshot_artefacts/Release/buildapp_snapshot <dir>`
 renders the editor to PNGs (rest, build, peak, cuts, types, and the presets
 rise, squeeze, vacuum, sunrise, pumping, tail and downlift, plus intensity and
-scream with lanes turned down) with the built-in loop playing through it, no DAW
-needed. `... <dir> bench` times the paints instead.
+scream with lanes turned down, and switched: Off and back, then the next preset,
+printing the intensities after each step) with the built-in loop playing through
+it, no DAW needed. `... <dir> bench` times the paints instead.
 
 ### Trying it without a DAW
 

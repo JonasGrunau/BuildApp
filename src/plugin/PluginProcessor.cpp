@@ -11,6 +11,7 @@ namespace
     namespace map = ba::map;
 
     const juce::String kOff ("Off");
+    const juce::Identifier kIntensitiesOf ("intensitiesOf");   // in the saved state
 
     bool saysOff (const juce::String& t) { return t.trim().equalsIgnoreCase ("off"); }
 
@@ -167,6 +168,22 @@ ba::Intensity BuildAppProcessor::intensity() const noexcept
              at (Raw::reverbIntensity), at (Raw::stereoIntensity), at (Raw::levelIntensity) };
 }
 
+void BuildAppProcessor::presetPicked (int i)
+{
+    // Whatever is on now (picked here, loaded or automated) is what they were set on.
+    if (const int now = juce::roundToInt (raw (Raw::preset)); now != 0) intensitiesOf = now;
+    if (i == 0 || i == intensitiesOf) return;
+    intensitiesOf = i;
+    for (int r = Raw::lowCutIntensity; r <= Raw::levelIntensity; ++r)
+    {
+        if (raw (r) >= 100.f) continue;
+        auto& p = param (kRawIds[r]);
+        p.beginChangeGesture();
+        p.setValueNotifyingHost (p.getDefaultValue());
+        p.endChangeGesture();
+    }
+}
+
 ba::Settings BuildAppProcessor::ownSettings() const noexcept
 {
     ba::Settings s;
@@ -257,7 +274,9 @@ void BuildAppProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
 
 void BuildAppProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    if (auto xml = apvts.copyState().createXml())
+    auto state = apvts.copyState();
+    state.setProperty (kIntensitiesOf, intensitiesOf.load(), nullptr);
+    if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
 
@@ -265,7 +284,10 @@ void BuildAppProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         if (xml->hasTagName (apvts.state.getType()))
+        {
+            intensitiesOf = xml->getIntAttribute (kIntensitiesOf, 0);
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
+        }
 }
 
 juce::AudioProcessorEditor* BuildAppProcessor::createEditor() { return new BuildAppEditor (*this); }

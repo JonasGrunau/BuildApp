@@ -128,6 +128,7 @@ private:
 // the chevron step to the previous / next choice, wrapping at the ends; the
 // field keeps them in one place whatever the choice. A preset can drive it: then it shows the
 // preset's choice, without the chevron, its keys dimmed, and can't be changed.
+// beforeChoose runs when the user picks another choice, before it is set.
 class TypeSelector : public juce::Component
 {
 public:
@@ -149,6 +150,7 @@ public:
     void setField (float x, float w) { fieldX = x; field = std::max (widest, w); repaint(); }
     int idealWidth() const;   // room for the field, its chevron and the keys
     std::function<void (TypeSelector*, bool)> onHover;
+    std::function<void (int choice)> beforeChoose;
 
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
