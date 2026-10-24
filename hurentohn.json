@@ -2,7 +2,7 @@
   "schema": 1,
   "name": "BuildApp",
   "category": "Buildup effect",
-  "description": "A buildup effect for psytrance. Put it on the loop or the group you want to build, ride the knobs over the last bars, and pull them back for the drop. Twelve knobs in one chain, or one of nineteen presets driven by a single BUILD knob.",
+  "description": "A buildup effect. Put it on the loop or the group you want to build, ride the knobs over the last bars, and pull them back for the drop. Twelve knobs in one chain, or one of nineteen presets driven by a single BUILD knob.",
   "image": "docs/screenshot.png",
   "bundles": ["BuildApp.vst3", "BuildApp.component"],
   "build": {
