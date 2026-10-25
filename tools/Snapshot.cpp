@@ -20,6 +20,8 @@
 //   downlift preset Downsweep at BUILD 25 %: the noise falling from the hit
 //   steps    rise, with the mouse on the preset's > key and the high cut's
 //            < key held down (it wraps to the last type); the low cut's keys dimmed
+//   pressed  rise, EDIT held down (its top edge a pixel lower, its bottom edge
+//            where it was)
 //   intensity rise with the low cut at 50 %, the noise at 25 % and the stereo at
 //            0 % intensity, the mouse on the noise's knob (its help in the footer)
 //   scream   preset Acid Scream at BUILD 60 %, its resonance at 30 % intensity
@@ -36,11 +38,26 @@
 //   edit-bend a low cut segment Option-dragged, mid-bend
 //   edit-new PRESET off: the editor with no lanes yet
 //   edit-small Full-On Rise at the editor's smallest size
+//   edit-keys the SHORTCUTS panel over the lanes
+//   edit-many Full-On Rise with every lane, too many to fit: scrolled down a
+//            little, the mouse on a noise pitch segment (it shows heavier,
+//            with the value of its nearer key)
+//   edit-kb  the keys: a click on the noise row (the insert marker), Right
+//            twice, Enter (a breakpoint there, selected), Up three times
+//            (its value, not confirmed yet)
+//   edit-zoom a time selection over the low cut and noise rows, Z (it fills
+//            the view, the grid follows), a swipe to the right; the overview
+//            shows where the view is
+//   lanes    section A alone for every factory preset at BUILD 60 %
+//            (buildapp_lanes_NN.png, NN the preset's number)
 //   bench    times the spectrum and whole-editor paints instead
 //   edit-bench times the preset editor's paints on Full-On Rise
 //   selftest no picture: the user presets end to end (a factory preset copied
 //            by its first edit, undo and redo, the project state and what it
-//            plays, the library, a project from before more factory presets);
+//            plays, the library, a project from before more factory presets)
+//            and a knob's double-click (number: types, elsewhere: resets),
+//            the lane keys (Enter adds at the insert marker, Esc takes it
+//            back without an undo step, Enter Up Enter is one undo step);
 //            prints each check, exits non-zero when one fails
 
 #include "TestUtil.h"
@@ -248,18 +265,93 @@ namespace
             check (d.presetIndex() == a.presetIndex() && d.user[slot].used, "a project from before a new factory preset finds its user preset");
         }
         folder.deleteRecursively();
+
+        // A knob: a double-click on its number types a value, anywhere else on it resets it.
+        {
+            BuildAppProcessor k;
+            Dial dial (k.param (ids::pitch), "PITCH", {});
+            dial.setSize (90, 104);   // a 66 px disc, the name, the number on 83..99
+            const auto pitch = [&k] { return k.param (ids::pitch).convertFrom0to1 (k.param (ids::pitch).getValue()); };
+            const auto typing = [&dial] { return childrenOf<juce::TextEditor> (dial).size() == 1; };
+            set (k, ids::pitch, 7.f);
+            dial.mouseDoubleClick (mouse (dial, { 45.f, 30.f }));
+            check (std::abs (pitch()) < 1e-3f && ! typing(), "a double-click on a knob resets it");
+            set (k, ids::pitch, 7.f);
+            dial.mouseDoubleClick (mouse (dial, { 45.f, 90.f }));
+            check (std::abs (pitch() - 7.f) < 1e-3f && typing(), "a double-click on its number opens the text field");
+        }
+
+        // The lane keys, as in Live: Enter adds a breakpoint at the insert
+        // marker, Esc takes it back (no undo step, the factory preset still
+        // on); Enter, Up, Enter keeps one, a step up, as one undo step.
+        {
+            BuildAppProcessor k;
+            set (k, ids::preset, 1.f);
+            k.prepareToPlay (fs, 512);
+            PresetEditorView view (k);
+            view.setSize (PresetEditorView::kWidth, PresetEditorView::kHeight);
+            view.tick();
+            pump (50);
+            auto& lanes = view.laneEditor();
+            const auto noise = [&k] { return ba::lane (*k.activePreset(), ba::LaneId::noise); };
+            const auto press = [&view] (int code) { view.keyPressed (juce::KeyPress (code)); };
+            const int before = noise().count;
+            const auto at = lanes.pointOf (1, 0.3f, 0.97f);   // the noise row, over its line: the background
+            lanes.mouseDown (mouse (lanes, at, {}, at));
+            lanes.mouseUp (mouse (lanes, at, {}, at));
+            press (juce::KeyPress::returnKey);
+            check (noise().count == before + 1 && P::slotOf (k.presetIndex()) >= 0, "Enter adds a breakpoint at the insert marker (the preset copied)");
+            press (juce::KeyPress::escapeKey);
+            view.tick();
+            check (k.presetIndex() == 1 && noise().count == before, "Esc takes it back: the factory preset is on again, as it was");
+            view.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0));
+            view.tick();
+            check (k.presetIndex() == 1, "and leaves no undo step behind");
+            press (juce::KeyPress::returnKey);
+            const float line = ba::edit::valueAfter (noise(), 0.3f);
+            press (juce::KeyPress::upKey);
+            press (juce::KeyPress::returnKey);
+            const auto& l = noise();
+            bool raised = false;
+            for (int i = 0; i < l.count; ++i) raised = raised || (std::abs (l.keys[(size_t) i].at - 0.3f) < 1e-4f && std::abs (l.keys[(size_t) i].value - line - 0.01f) < 1e-4f);
+            check (l.count == before + 1 && raised, "Enter, Up, Enter keeps it, 1 % up");
+            view.keyPressed (juce::KeyPress ('z', juce::ModifierKeys::commandModifier, 0));
+            view.tick();
+            check (k.presetIndex() == 1 && noise().count == before, "one undo takes all of it back");
+
+            // Zoom, as in Live: Z fills the view with the selection, X goes
+            // back, a pinch zooms around the mouse (the adaptive grid gets
+            // finer), a sideways swipe scrolls along.
+            const auto near = [] (float a, float b) { return std::abs (a - b) < 1e-3f; };
+            const auto a = lanes.pointOf (1, 0.4f, 0.97f), b = lanes.pointOf (1, 0.6f, 0.97f);
+            lanes.mouseDown (mouse (lanes, a, {}, a));
+            lanes.mouseDrag (mouse (lanes, b, {}, a, true));
+            lanes.mouseUp (mouse (lanes, b, {}, a, true));
+            view.keyPressed (juce::KeyPress ('z'));
+            const float s0 = 0.4f * ba::kPathEnd, s1 = 0.6f * ba::kPathEnd, m = (s1 - s0) * 0.04f;
+            check (near (lanes.viewStart(), s0 - m) && near (lanes.viewEnd(), s1 + m), "Z zooms to the time selection");
+            view.keyPressed (juce::KeyPress ('x'));
+            check (near (lanes.viewStart(), 0.f) && near (lanes.viewEnd(), 1.f), "X zooms back");
+            const int coarse = lanes.grid();
+            const auto mid = lanes.pointOf (0, 0.5f, 0.5f);   // BUILD 37.5 %
+            lanes.mouseMagnify (mouse (lanes, mid), 2.f);
+            check (near (lanes.viewEnd() - lanes.viewStart(), 0.5f) && near (lanes.viewStart(), 0.1875f), "a pinch zooms around the mouse");
+            check (lanes.grid() == coarse + 1, "the adaptive grid follows the zoom");
+            const float before0 = lanes.viewStart();
+            lanes.mouseWheelMove (mouse (lanes, mid), juce::MouseWheelDetails { -0.25f, 0.f, false, true, false });
+            check (lanes.viewStart() > before0 + 0.01f && near (lanes.viewEnd() - lanes.viewStart(), 0.5f), "a swipe scrolls along the build");
+            lanes.mouseWheelMove (mouse (lanes, mid, juce::ModifierKeys::commandModifier), juce::MouseWheelDetails { 0.f, -1.f, false, false, false });
+            check (lanes.viewEnd() - lanes.viewStart() > 0.5f, "Cmd and the wheel zoom out");
+        }
     }
 
     // The preset editor driven the way the edit* states say (see the top).
     void editorState (const juce::String& state, PresetEditorView& view)
     {
         auto& lanes = view.laneEditor();
-        // Where a lane value sits on a row of the lane editor (as LaneEditor lays it out).
-        const auto spot = [&lanes] (int row, float path, float value, ba::LaneRange r = {}) {
-            const float plotX = LaneEditor::kPad, plotW = (float) lanes.getWidth() - 2.f * LaneEditor::kPad - LaneEditor::kValueW;
-            const float top = lanes.rowTop (row) + 8.f, h = lanes.rowHeight() - 16.f;
-            return juce::Point<float> (plotX + plotW * path * ba::kPathEnd, top + h * (1.f - r.norm (value)));
-        };
+        // Where a lane value sits on a row of the lane editor.
+        const auto spot = [&lanes] (int row, float path, float value) { return lanes.pointOf (row, path, value); };
+        const auto press = [&view] (int code, juce::ModifierKeys mods = {}) { view.keyPressed (juce::KeyPress (code, mods, 0)); };
         const auto drag = [&lanes] (juce::Point<float> from, std::initializer_list<juce::Point<float>> path, juce::ModifierKeys mods, bool release) {
             lanes.mouseMove (mouse (lanes, from, mods));
             lanes.mouseDown (mouse (lanes, from, mods, from));
@@ -276,11 +368,9 @@ namespace
         else if (state == "edit-draw")
         {
             lanes.setDrawMode (true);
-            const ba::LaneRange st { 0.f, 12.f };
-            drag (spot (1, 0.3f, 2.f, st), { spot (1, 0.36f, 3.f, st), spot (1, 0.42f, 5.f, st), spot (1, 0.49f, 5.f, st), spot (1, 0.55f, 8.f, st),
-                                             spot (1, 0.61f, 10.f, st) },
+            drag (spot (1, 0.3f, 2.f), { spot (1, 0.36f, 3.f), spot (1, 0.42f, 5.f), spot (1, 0.49f, 5.f), spot (1, 0.55f, 8.f), spot (1, 0.61f, 10.f) },
                   {}, true);
-            lanes.mouseMove (mouse (lanes, spot (1, 0.7f, 9.f, st)));
+            lanes.mouseMove (mouse (lanes, spot (1, 0.7f, 9.f)));
         }
         else if (state == "edit-select")
         {
@@ -291,6 +381,35 @@ namespace
         {
             const auto on = spot (0, 0.65f, 0.46f);
             drag (on, { on.translated (0.f, -8.f), on.translated (0.f, -18.f) }, juce::ModifierKeys::altModifier, false);
+        }
+        else if (state == "edit-keys") view.showShortcuts (true);
+        else if (state == "edit-many")
+        {
+            for (const auto id : ba::kLaneIds) view.addLane (id);   // the ones it has stay as they are
+            pump (50);                                              // the headers come in on the message loop
+            lanes.mouseWheelMove (mouse (lanes, spot (2, 0.5f, 0.5f)), juce::MouseWheelDetails { 0.f, -0.5f, false, false, false });
+            // 7 px over the noise pitch line: near it, not on it.
+            const auto id = ba::LaneId::noisePitch;
+            const int row = (int) std::distance (ba::kLaneIds.begin(), std::find (ba::kLaneIds.begin(), ba::kLaneIds.end(), id));
+            lanes.mouseMove (mouse (lanes, spot (row, 0.42f, ba::edit::valueAfter (ba::lane (ba::kPresets[0], id), 0.42f)).translated (0.f, -7.f)));
+        }
+        else if (state == "edit-kb")
+        {
+            const auto at = spot (1, 0.3f, 0.97f);   // Full-On Rise's noise row, well over its line
+            lanes.mouseDown (mouse (lanes, at, {}, at));
+            lanes.mouseUp (mouse (lanes, at, {}, at));
+            press (juce::KeyPress::rightKey);
+            press (juce::KeyPress::rightKey);
+            press (juce::KeyPress::returnKey);
+            for (int i = 0; i < 3; ++i) press (juce::KeyPress::upKey);
+            lanes.mouseExit (mouse (lanes, { -10.f, -10.f }));
+        }
+        else if (state == "edit-zoom")
+        {
+            drag (spot (1, 0.3f, 0.97f), { spot (0, 0.45f, 0.97f), spot (0, 0.55f, 0.97f) }, {}, true);
+            press ('z');
+            lanes.mouseWheelMove (mouse (lanes, spot (1, 0.5f, 0.5f)), juce::MouseWheelDetails { -0.06f, 0.f, false, true, false });
+            lanes.mouseMove (mouse (lanes, spot (0, 0.5f, 0.4f)));   // the low cut's key at 50 %
         }
         view.tick();
     }
@@ -348,8 +467,9 @@ int main (int argc, char** argv)
         if (const juce::String a (argv[i]); a.startsWith ("--scale=")) scale = a.fromFirstOccurrenceOf ("=", false, false).getFloatValue();
         else states.add (a);
     if (states.isEmpty())
-        states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps",
-                   "intensity", "scream", "switched", "edit", "edit-fork", "edit-draw", "edit-select", "edit-bend", "edit-new", "edit-small" };
+        states = { "rest", "build", "peak", "cuts", "types", "rise", "squeeze", "vacuum", "sunrise", "pumping", "tail", "downlift", "steps", "pressed",
+                   "intensity", "scream", "switched", "edit", "edit-fork", "edit-draw", "edit-select", "edit-bend", "edit-new", "edit-small",
+                   "edit-keys", "edit-many", "edit-kb", "edit-zoom" };
 
     const double fs = 48000.0;
     const auto loop = testutil::psyLoop (fs, 60.0 / 145.0 * 8.0);   // two bars
@@ -365,8 +485,8 @@ int main (int argc, char** argv)
             k = { 0.3f, 0.7f, 0.f, 0.f, 0.5f, 0.f, 0.f, 0.f, 100.f };
         else if (state == "types")
             k = { 0.3f, 0.7f, 0.f, 0.f, 0.5f, 0.f, 0.f, 0.f, 100.f, 1, 3, false, 22.f };
-        else if (state == "rise" || state == "steps" || state == "edit" || state == "edit-fork" || state == "edit-select" || state == "edit-bend"
-                 || state == "edit-small" || state == "edit-bench")
+        else if (state == "rise" || state == "steps" || state == "pressed" || state == "edit" || state == "edit-fork" || state == "edit-select" || state == "edit-bend"
+                 || state == "edit-small" || state == "edit-bench" || state == "edit-keys" || state == "edit-many" || state == "edit-kb" || state == "edit-zoom")
             k = { .preset = 1, .build = 70.f };
         else if (state == "squeeze")
             k = { .preset = 9, .build = 90.f };
@@ -406,6 +526,14 @@ int main (int argc, char** argv)
             pump (50);
         }
 
+        if (state == "pressed")
+            for (auto* key : childrenOf<TextKey> (*editor))
+            {
+                const auto at = key->getLocalBounds().getCentre().toFloat();
+                key->mouseEnter (mouse (*key, at));
+                key->mouseDown (mouse (*key, at, {}, at));
+            }
+
         if (state == "intensity")
             for (auto* knob : childrenOf<SmallDial> (*editor))
                 if (knob->isVisible() && knob->getHelp().startsWith ("Noise intensity"))
@@ -442,6 +570,26 @@ int main (int argc, char** argv)
         if (state == "selftest")
         {
             selfTest (loop, fs);
+            continue;
+        }
+
+        if (state == "lanes")
+        {
+            // Section A alone for every factory preset at BUILD 60 %, the loop playing.
+            for (int n = 1; n <= BuildAppProcessor::kFactory; ++n)
+            {
+                set (proc, ids::preset, (float) n);
+                set (proc, ids::build, 60.f);
+                play (proc, *editor, loop, fs, 0.3);
+                pump (20);
+                const auto band = juce::Rectangle<int> (0, 76, BuildAppEditor::kWidth, BuildAppEditor::kFold + 36);
+                const auto img = editor->createComponentSnapshot (band, true, scale);
+                const auto file = outDir.getChildFile ("buildapp_lanes_" + juce::String (n).paddedLeft ('0', 2) + ".png");
+                file.deleteFile();
+                juce::FileOutputStream os (file);
+                juce::PNGImageFormat().writeImageToStream (img, os);
+            }
+            std::printf ("lanes -> %s/buildapp_lanes_*.png\n", outDir.getFullPathName().toRawUTF8());
             continue;
         }
 

@@ -6,7 +6,7 @@
 #include "ui/PresetEditor.h"
 #include "ui/SpectrumView.h"
 
-// One sheet, laid out at 880 x 730 and scaled as a whole when the window is
+// One sheet, laid out at 880 x 774 and scaled as a whole when the window is
 // resized (fixed aspect); with no preset the build band folds away to its
 // menu and the sheet is 880 x 548:
 //   header   wordmark, input and output meters
@@ -24,8 +24,8 @@
 class BuildAppEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
 public:
-    static constexpr int kWidth = 880, kHeight = 730;   // with a preset
-    static constexpr int kFold = 182;                   // what the build band gives back without one
+    static constexpr int kWidth = 880, kHeight = 774;   // with a preset
+    static constexpr int kFold = 226;                   // what the build band gives back without one
 
     explicit BuildAppEditor (BuildAppProcessor&);
     ~BuildAppEditor() override;

@@ -135,7 +135,8 @@ public:
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return label (10.f); }
     void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) override
     {
-        const auto r = b.getLocalBounds().toFloat().reduced (0.5f).translated (0.f, down ? 1.f : 0.f);
+        // Pressed, the top edge comes down a pixel (the text follows); the bottom stays inside the button.
+        const auto r = b.getLocalBounds().toFloat().reduced (0.5f).withTrimmedTop (down ? 1.f : 0.f);
         if (b.getToggleState())
         {
             g.setColour (col::ink);

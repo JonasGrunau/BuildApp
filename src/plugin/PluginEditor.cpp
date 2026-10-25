@@ -17,10 +17,10 @@ namespace
     // Each section: a rule, its tag (13 high) kGap clear of it, its content
     // kGap clear of the tag, and kGap from the content to the next rule.
     constexpr float kGap = 12.f, kTagH = 13.f, kRuleH = 1.f;
-    // A (under the 1.5 px masthead rule at 74): seven lanes of 22 px (room
-    // for their intensity knobs) over the BUILD axis.
-    constexpr float kBuildTagY = 87.f, kBuildY = kBuildTagY + kTagH + kGap, kBuildH = 7.f * 22.f + BuildTimeline::kAxis;
-    constexpr float kBuildRuleY = kBuildY + kBuildH + kGap;                                              // 294
+    // A (under the 1.5 px masthead rule at 74): room for seven lanes over
+    // the BUILD axis.
+    constexpr float kBuildTagY = 87.f, kBuildY = kBuildTagY + kTagH + kGap, kBuildH = 7.f * BuildTimeline::kMinRow + BuildTimeline::kAxis;
+    constexpr float kBuildRuleY = kBuildY + kBuildH + kGap;                                              // 338
     constexpr float kBuildDisc = 120.f;                                                                  // the BUILD knob
     constexpr float kSpecTagY = kBuildRuleY + kRuleH + kGap, kSpecY = kSpecTagY + kTagH + kGap, kSpecH = 194.f;   // B
     constexpr float kRuleY = kSpecY + kSpecH + kGap, kTagY = kRuleY + kRuleH + kGap;                    // C..G
@@ -178,8 +178,9 @@ void BuildAppEditor::layout()
     preset.setBounds (150, (int) kBuildTagY - 2, preset.idealWidth(), 17);
     edit.setBounds (preset.getRight() + 10, (int) kBuildTagY - 2, edit.idealWidth(), 17);
     timeline.setBounds (24, (int) kBuildY, 680, (int) kBuildH);
+    timeline.setHeadWidth ((float) (preset.getX() - timeline.getX()));   // the wells start under PRESET (and B's LOW CUT)
     // Its value on the timeline's axis line (the disc, 4 px, the name's 13 px, then the value).
-    const float buildTop = kBuildY + kBuildH - BuildTimeline::kAxis + 4.f - (kBuildDisc + 17.f);
+    const float buildTop = kBuildY + kBuildH - BuildTimeline::kAxis + 6.f - (kBuildDisc + 17.f);
     build.setBounds (728, (int) buildTop, 128, (int) kBuildDisc + 36);
     timeline.setVisible (open);
     build.setVisible (open);

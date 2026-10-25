@@ -25,7 +25,11 @@ BuildTimeline::BuildTimeline (BuildAppProcessor& p) : proc (p)
     for (size_t i = 0; i < kLanes; ++i)
     {
         knobs[i] = std::make_unique<SmallDial> (proc.param (knobParams[i].first), knobParams[i].second);
-        knobs[i]->onHover = [this] (SmallDial* d, bool on) { if (onHelp) onHelp (on ? d->getHelp() : juce::String()); };
+        knobs[i]->onHover = [this, i] (SmallDial* d, bool on) {
+            hotLane = on ? (int) i : -1;
+            repaint (0, 0, juce::roundToInt (headW), getHeight());   // the names
+            if (onHelp) onHelp (on ? d->getHelp() : juce::String());
+        };
         addChildComponent (*knobs[i]);
     }
 }
@@ -92,7 +96,26 @@ std::vector<BuildTimeline::Row> BuildTimeline::rows (const ba::Preset& p) const
 
 juce::Rectangle<float> BuildTimeline::plot() const
 {
-    return getLocalBounds().toFloat().withTrimmedLeft (kLabelW).withTrimmedRight (kValueW + kKnobW + kGap).withTrimmedBottom (kAxis);
+    return getLocalBounds().toFloat().withTrimmedLeft (headW).withTrimmedRight (kGap + kValueW + kGap + kKnobW).withTrimmedBottom (kAxis);
+}
+
+void BuildTimeline::setHeadWidth (float w)
+{
+    w = std::round (w);   // the wells on whole pixels
+    if (std::abs (w - headW) < 1e-3f) return;
+    headW = w;
+    placeKnobs();
+    repaint();
+}
+
+juce::Rectangle<float> BuildTimeline::rowArea (size_t i, size_t count) const
+{
+    // The rows share the band: fewer lanes, taller rows; on whole pixels,
+    // so the wells' edges and the hairlines between them stay sharp at 1x.
+    const auto p = plot();
+    const float h = p.getHeight() / (float) std::max<size_t> (1, count);
+    const float y0 = std::round (p.getY() + (float) i * h), y1 = std::round (p.getY() + (float) (i + 1) * h);
+    return { 0.f, y0, (float) getWidth(), y1 - y0 };
 }
 
 float BuildTimeline::xFor (float build) const
@@ -107,12 +130,10 @@ void BuildTimeline::placeKnobs()
     if (const auto* preset = proc.activePreset())
     {
         const auto list = rows (*preset);
-        const auto p = plot();
-        const float laneH = p.getHeight() / (float) std::max<size_t> (1, list.size());
         for (size_t i = 0; i < list.size(); ++i)
         {
             auto& knob = *knobs[(size_t) list[i].lane];
-            const juce::Point<float> centre (p.getRight() + kGap + kKnobW * 0.5f, p.getY() + laneH * ((float) i + 0.5f));
+            const juce::Point<float> centre ((float) getWidth() - kKnobW * 0.5f, rowArea (i, list.size()).getCentreY());
             knob.setBounds (juce::Rectangle<float> (kKnobW, kKnobW).withCentre (centre).toNearestInt());
             knob.setHelp (knobHelp (list[i].lane, *preset));
             shown[(size_t) list[i].lane] = true;
@@ -150,9 +171,8 @@ void BuildTimeline::paint (juce::Graphics& g)
     const auto p = plot();
     if (preset == nullptr) return;   // the band is folded away
 
-    const float build = proc.buildAmount(), playX = xFor (build);
+    const float build = proc.buildAmount(), playX = xFor (build), endX = xFor (ba::kPathEnd);
     const auto list = rows (*preset);
-    const float laneH = p.getHeight() / (float) std::max<size_t> (1, list.size());
     // What the chain runs with along BUILD, sampled once for every lane: as
     // the intensities have it, at full intensity, and at none (where each
     // lane rests).
@@ -172,13 +192,35 @@ void BuildTimeline::paint (juce::Graphics& g)
     {
         const auto& row = list[i];
         const auto valueAt = [&] (int k) { return row.value (along[(size_t) k]); };
-        const auto lane = juce::Rectangle<float> (p.getX(), p.getY() + laneH * (float) i, p.getWidth(), laneH);
-        const float top = lane.getY() + 3.f, span = lane.getHeight() - 5.f;
+        const auto band = rowArea (i, list.size());
+        // The well: kRowGap / 2 clear of the hairline over the row (which takes its top pixel) and of the row's bottom.
+        const auto lane = band.withLeft (p.getX()).withRight (p.getRight()).withTrimmedTop (kRowGap * 0.5f + 1.f).withTrimmedBottom (kRowGap * 0.5f);
+        const float top = lane.getY() + kPad, span = lane.getHeight() - 2.f * kPad;
+
+        // A hairline between the rows, through the header and the well.
+        if (i > 0)
+        {
+            g.setColour (col::hairline);
+            g.fillRect (0.f, band.getY(), band.getWidth(), 1.f);
+        }
+
+        // Graph paper, as in the preset editor: the well, BUILD's quarters,
+        // the tail past the path hatched.
+        g.setColour (col::well);
+        g.fillRect (lane);
+        g.setColour (col::hairline);
+        for (const float q : { 0.25f, 0.5f, ba::kPathEnd })
+            g.fillRect (std::round (xFor (q)), lane.getY(), 1.f, lane.getHeight());
+        {
+            juce::Graphics::ScopedSaveState s (g);
+            g.reduceClipRegion (lane.withLeft (std::round (endX) + 1.f).toNearestInt());
+            hatch (g, p.withLeft (endX), col::hairline, 5.f, 1.f);   // one hatching for the column: its lines run on across the rows
+        }
 
         // Each lane spans its own range, from where it rests to the preset's
         // full path, so when it moves reads at any size, and turning its
         // intensity down flattens it towards rest; how far is in the value
-        // on the right.
+        // in its header.
         float lo = 1e9f, hi = -1e9f;
         for (const auto* path : { &full, &none, &along })
             for (const auto& s : *path)
@@ -213,9 +255,9 @@ void BuildTimeline::paint (juce::Graphics& g)
         if (intensity.*kIntensityOf[(size_t) row.lane] < 1.f)
         {
             juce::Path dashed;
-            const float dashes[] = { 2.f, 3.f };
-            juce::PathStrokeType (1.f).createDashedStroke (dashed, pathOf (full), dashes, 2);
-            g.setColour (col::inkFaint.withAlpha (0.7f));
+            const float dashes[] = { 3.f, 3.f };
+            juce::PathStrokeType (1.2f).createDashedStroke (dashed, pathOf (full), dashes, 2);
+            g.setColour (col::inkFaint);
             g.fillPath (dashed);
         }
 
@@ -249,38 +291,47 @@ void BuildTimeline::paint (juce::Graphics& g)
             fill.lineTo (playX, yFor (row.value (restNow)));
             for (int k = to; k >= from; --k) fill.lineTo (restAt (k));
             fill.closeSubPath();
-            g.setColour (col::accent.withAlpha (0.12f));
+            g.setColour (col::accent.withAlpha (0.1f));
             g.fillPath (fill);
         }
         g.setColour (col::inkFaint);
         g.strokePath (pathOf (along), juce::PathStrokeType (1.2f));
         g.setColour (col::accent);
-        g.strokePath (built, juce::PathStrokeType (1.6f));
+        g.strokePath (built, juce::PathStrokeType (1.8f));
 
-        // Name on the left, value at BUILD on the right.
-        caption (g, row.label, { 0.f, lane.getY(), kLabelW - 8.f, laneH }, juce::Justification::centredLeft, col::inkSoft, 9.f);
+        // Its name on the left; on the right its value at BUILD (bright once
+        // it has moved off its start), then its knob.
+        caption (g, row.label, band.withRight (headW - kGap), juce::Justification::centredLeft,
+                 hotLane == (int) row.lane ? col::ink : col::inkSoft, 10.f);
         g.setColour (moved (row.value (now)) ? col::ink : col::inkFaint);
-        g.setFont (mono (10.f));
-        g.drawText (row.text (row.value (now)), juce::Rectangle<float> ((float) getWidth() - kValueW, lane.getY(), kValueW, laneH),
-                    juce::Justification::centredRight, false);
+        g.setFont (mono (11.f));
+        g.drawText (row.text (row.value (now)), band.withX (p.getRight() + kGap).withWidth (kValueW), juce::Justification::centredRight, false);
     }
 
-    // Playhead and the BUILD axis.
-    g.setColour (col::accent);
-    g.fillRect (playX - 0.5f, p.getY(), 1.f, p.getHeight() + 4.f);
+    // The BUILD axis under the wells, the tail named; the playhead through
+    // every row, its head on the axis.
+    const float base = p.getBottom();
     g.setFont (mono (9.f));
     for (int q = 0; q <= 4; ++q)
     {
-        const float x = xFor ((float) q / 4.f);
-        g.setColour (col::inkFaint);
-        g.fillRect (x - 0.5f, p.getBottom() + 1.f, 1.f, 3.f);
-        const auto t = q == 4 ? juce::String ("100 %") : juce::String (q * 25);
+        const float x = std::round (xFor ((float) q / 4.f));
+        g.setColour (col::inkSoft);
+        g.fillRect (x, base, 1.f, 5.f);
+        const auto t = juce::String (q * 25) + " %";
         const auto j = q == 0 ? juce::Justification::centredLeft : q == 4 ? juce::Justification::centredRight : juce::Justification::centred;
-        const auto r = q == 0 ? juce::Rectangle<float> (x, p.getBottom() + 4.f, 40.f, 12.f)
-                     : q == 4 ? juce::Rectangle<float> (x - 40.f, p.getBottom() + 4.f, 40.f, 12.f)
-                              : juce::Rectangle<float> (x - 20.f, p.getBottom() + 4.f, 40.f, 12.f);
+        const auto r = q == 0 ? juce::Rectangle<float> (x + 3.f, base + 6.f, 60.f, 12.f)
+                     : q == 4 ? juce::Rectangle<float> (x - 62.f, base + 6.f, 60.f, 12.f)
+                              : juce::Rectangle<float> (x - 30.f, base + 6.f, 60.f, 12.f);
         g.drawText (t, r, j, false);
     }
+    caption (g, "Tail", { endX, base + 6.f, xFor (1.f) - endX, 12.f }, juce::Justification::centred, col::inkFaint, 9.f);
+    caption (g, "Intensity", { p.getRight() + kGap, base + 6.f, (float) getWidth() - p.getRight() - kGap, 12.f },
+             juce::Justification::centredRight, col::inkFaint, 9.f);   // the knobs' column
+    g.setColour (col::accent);
+    g.fillRect (playX - 0.5f, p.getY() + kRowGap * 0.5f, 1.f, base - p.getY() - kRowGap * 0.5f);
+    juce::Path head;
+    head.addTriangle (playX - 4.f, base + 6.f, playX + 4.f, base + 6.f, playX, base - 1.f);
+    g.fillPath (head);
 }
 
 void BuildTimeline::scrub (float x)

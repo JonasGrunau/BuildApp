@@ -13,9 +13,11 @@ class BuildAppProcessor;
 // per control it drives, in the knob row's order, plus the reverb (every
 // preset ends in a tail) and the level (its makeup gain and the fade): the
 // control's path over the build, with the part already built in the signal
-// colour. A playhead marks BUILD; each lane ends in a small INTENSITY knob
-// (how much of that lane lands, ba::Intensity) and the control's value at
-// BUILD, in the knob's own words.
+// colour. A playhead marks BUILD. Each lane is a row: its name, its own
+// well of graph paper (BUILD's quarters, the tail past the path hatched),
+// then the control's value at BUILD in the knob's own words and its
+// INTENSITY knob (how much of that lane lands, ba::Intensity); a hairline
+// between the rows.
 //
 // A lane spans the range between where its control rests (the hairline it
 // shrinks towards as its intensity goes down: the bottom, 0 dB for level,
@@ -43,8 +45,15 @@ public:
     void mouseEnter (const juce::MouseEvent&) override;
     void mouseExit (const juce::MouseEvent&) override;
 
-    // Label | plot | gap | knob | value.
-    static constexpr float kLabelW = 86.f, kKnobW = 18.f, kGap = 10.f, kValueW = 64.f, kAxis = 16.f;
+    // A row: its name, its well, then the value at BUILD and the intensity
+    // knob on the right. The wells stand kRowGap apart with a hairline
+    // between the rows, the paths kPad inside them; the BUILD axis runs
+    // under the last one.
+    static constexpr float kKnobW = 18.f, kValueW = 52.f, kGap = 8.f, kRowGap = 6.f, kPad = 4.f, kAxis = 18.f;
+    static constexpr float kMinRow = 28.f;   // seven lanes at most: the band is laid out for that many
+
+    // Where the wells start (the editor lines them up with the menus above).
+    void setHeadWidth (float w);
 
 private:
     // The lanes there can be, in the knob row's order; each has a knob.
@@ -67,16 +76,19 @@ private:
 
     std::vector<Row> rows (const ba::Preset&) const;
     juce::Rectangle<float> plot() const;   // where the lanes run, left to right = BUILD 0..1
+    juce::Rectangle<float> rowArea (size_t i, size_t count) const;   // row i of `count`, header and well, full width
     float xFor (float build) const;
     void scrub (float x);
     void placeKnobs();                     // one knob per shown lane, the rest hidden
     juce::String knobHelp (Lane, const ba::Preset&) const;
 
     BuildAppProcessor& proc;
+    float headW = 126.f;
     std::array<std::unique_ptr<SmallDial>, kLanes> knobs;
     const ba::Preset* shownPreset = nullptr;
     float shownBuild = -1.f, shownReverb = -1.f;
     uint32_t shownGen = 0;
     ba::Intensity shownIntensity;
     bool dragging = false;
+    int hotLane = -1;   // the lane whose knob the mouse is on: its name lights up
 };

@@ -11,9 +11,12 @@ using P = BuildAppProcessor;
 
 namespace
 {
-    // The window's layout, top to bottom (logical pixels, unscaled).
-    constexpr int kLeft = 24, kHeaderW = 196, kHeaderGap = 6;
-    constexpr float kMastRuleY = 62.f, kPresetY = 74.f, kRuleY = 102.f, kTagY = 114.f, kLanesY = 139.f, kFooter = 44.f;
+    // The window's layout, top to bottom (logical pixels, unscaled): the
+    // masthead, section A's two rows (the preset, its description), a rule,
+    // section B's row, the lanes, the footer. Rows are 22 high, 8 apart; 12
+    // from a rule to a row and from a row to what follows.
+    constexpr float kMastRuleY = 62.f, kRowA = 74.f, kRowA2 = 104.f, kRuleY = 138.f, kRowB = 150.f, kLanesY = 184.f;
+    constexpr int kRowH = 22, kFooter = 46, kKeyGap = 6, kGroupGap = 24;
 
     const char* laneName (L id)
     {
@@ -25,10 +28,10 @@ namespace
     {
         switch (id)
         {
-            case L::lowCut:      return "The low cut along the build, 20 Hz to 8 kHz (all the way down: off), in the type beside it.";
-            case L::lowReso:     return "The low cut's resonance along the build; switch it off with AUTO and auto resonance takes over again.";
-            case L::highCut:     return "The high cut along the build, 20 kHz down to 100 Hz (all the way up: off), in the type beside it.";
-            case L::highReso:    return "The high cut's resonance along the build; switch it off with AUTO and auto resonance takes over again.";
+            case L::lowCut:      return "The low cut along the build, 20 Hz to 8 kHz (all the way down: off), in the type under its name.";
+            case L::lowReso:     return "The low cut's resonance along the build; AUTO on the low cut hands it back to auto resonance.";
+            case L::highCut:     return "The high cut along the build, 20 kHz down to 100 Hz (all the way up: off), in the type under its name.";
+            case L::highReso:    return "The high cut's resonance along the build; AUTO on the high cut hands it back to auto resonance.";
             case L::pitch:       return "The pitch along the build, 0 to +12 semitones; STEPS keeps it on whole semitones (stairs).";
             case L::noise:       return "The noise's volume along the build (all the way down: off).";
             case L::noisePitch:  return "Where the noise band sits along the build, 80 Hz to 15 kHz.";
@@ -77,23 +80,34 @@ namespace
 
     std::vector<TypeSelector::Choice> gridChoices()
     {
-        constexpr const char* what[] = { "four bars", "two bars", "a bar", "half a bar", "a beat" };
+        constexpr const char* what[] = { "four bars", "two bars", "a bar", "half a bar", "a beat", "an eighth", "a sixteenth" };
+        static_assert (std::size (what) == LaneEditor::kGridCount);
         std::vector<TypeSelector::Choice> out;
         for (int g = 0; g < LaneEditor::kGridCount; ++g)
-            out.push_back ({ LaneEditor::gridName (g),
-                             "The grid: " + LaneEditor::gridName (g) + " of the path, " + what[g] + " of a 16-bar build (Cmd 1 narrower, Cmd 2 wider).", {} });
+            out.push_back ({ LaneEditor::gridName (g), "The grid: " + LaneEditor::gridName (g) + " of the path, " + what[g] + " of a 16-bar build.", {} });
         return out;
     }
 
     juce::juce_wchar upper (int code) { return juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) code); }
+
+    // Live's modifier names on this platform.
+   #if JUCE_MAC
+    const juce::String kCmd ("Cmd"), kOpt ("Option"), kNoSnap ("Cmd");
+   #else
+    const juce::String kCmd ("Ctrl"), kOpt ("Alt"), kNoSnap ("Alt");
+   #endif
+    juce::String u8 (const char* s) { return juce::String (juce::CharPointer_UTF8 (s)); }
 } // namespace
 
 // ---- A lane's header ----------------------------------------------------------------
 
-// Next to its row: the lane's name, its cut type and AUTO (cuts), STEPS
-// (pitch), the x that removes it, and its INTENSITY when that's turned down.
+// Beside its row: the lane's name and what it plays at BUILD (dim at rest),
+// the x that removes it; under them its cut type and AUTO (cuts) or STEPS
+// (pitch); its INTENSITY when that's turned down.
 struct PresetEditorView::Header : juce::Component
 {
+    static constexpr int kTop = (int) (LaneEditor::kRowGap * 0.5f) + 2, kLine2 = 25, kLine3 = 46;
+
     Header (PresetEditorView& v, L lane) : view (v), id (lane)
     {
         setOpaque (true);
@@ -116,13 +130,15 @@ struct PresetEditorView::Header : juce::Component
             option.onClick = [this] { view.setSteps (! option.isOn()); };
             addAndMakeVisible (option);
         }
-        remove.setHelp (juce::String ("Takes this lane out of the preset: ") + (cut ? "the cut goes back to your knob." : "the control goes back to your knob."));
+        remove.setHelp ("Removes this lane from the preset: the control goes back to your knob (" + kCmd + " Delete on its row).");
         remove.onClick = [this] { view.removeLane (id); };
         addAndMakeVisible (remove);
         for (auto* k : { &option, &remove })
             k->onHover = [this] (TextKey* key, bool on) { view.say (on ? key->getHelp() : juce::String()); };
         refresh();
     }
+
+    bool hasOptions() const { return type != nullptr || id == L::pitch; }
 
     void refresh()
     {
@@ -141,46 +157,178 @@ struct PresetEditorView::Header : juce::Component
 
     void resized() override
     {
-        const int w = getWidth();
-        remove.setBounds (w - 16, 4, 16, 16);
-        option.setBounds (w - 16 - 6 - option.idealWidth(), 4, option.idealWidth(), 16);
-        if (type != nullptr) type->setBounds (0, 24, w, 17);
+        const int w = getWidth() - 12;   // the right edge, clear of the rows
+        remove.setBounds (w - 16, kTop - 1, 16, 16);
+        if (hasOptions())
+        {
+            const int ow = option.idealWidth();
+            option.setBounds (w - ow, kLine2, ow, 17);
+            // The type's words start where the name does (the selector keeps 9 px for a name it hasn't got).
+            if (type != nullptr) type->setBounds (-9, kLine2, w - ow - 8 + 9, 17);
+        }
     }
 
     void paint (juce::Graphics& g) override
     {
         g.fillAll (col::sheet);
-        caption (g, laneName (id), { 0.f, 4.f, (float) getWidth() - 80.f, 16.f }, juce::Justification::centredLeft, hot ? col::ink : col::inkSoft, 9.5f);
+        const float w = (float) getWidth() - 12.f;
+        caption (g, laneName (id), { 0.f, (float) kTop, w - 100.f, 14.f }, juce::Justification::centredLeft, col::ink, 10.f);
+        // What it plays at BUILD, in the knob's words; at rest it steps back.
+        const float now = LaneEditor::valueIn (id, view.run (view.build(), false)), rest = LaneEditor::valueIn (id, view.run (0.f, false));
+        g.setFont (mono (11.f));
+        g.setColour (std::abs (now - rest) > 1e-5f ? col::ink : col::inkFaint);
+        g.drawText (view.words (id, now), juce::Rectangle<float> (w - 16.f - 8.f - 96.f, (float) kTop, 96.f, 14.f), juce::Justification::centredRight, false);
         if (intensity < 1.f)
         {
-            const float y = type != nullptr ? 44.f : 24.f;
-            if (y + 14.f <= (float) getHeight())
-                caption (g, "Intensity " + fmt::fixed (intensity * 100.0, 0) + " %", { 0.f, y, (float) getWidth(), 14.f }, juce::Justification::centredLeft,
-                         col::inkFaint, 9.f);
+            const float y = hasOptions() ? (float) kLine3 : (float) kLine2;
+            if (y + 13.f <= (float) getHeight() - LaneEditor::kRowGap * 0.5f)
+                caption (g, "Intensity " + fmt::fixed (intensity * 100.0, 0) + " %", { 0.f, y, w, 13.f }, juce::Justification::centredLeft, col::inkFaint, 9.f);
         }
-        g.setColour (col::hairline);
-        g.fillRect (0.f, (float) getHeight() - 1.f, (float) getWidth(), 1.f);
+        if (const auto rows = view.lanes(); ! rows.empty() && rows.back() != id)
+        {
+            g.setColour (col::hairline);
+            g.fillRect (0.f, (float) getHeight() - 1.f, (float) getWidth(), 1.f);
+        }
     }
 
-    void mouseEnter (const juce::MouseEvent&) override
-    {
-        hot = true;
-        repaint();
-        view.say (juce::String (laneName (id)) + theme::dot + laneHelp (id));
-    }
-    void mouseExit (const juce::MouseEvent&) override
-    {
-        hot = false;
-        repaint();
-        view.say ({});
-    }
+    void mouseEnter (const juce::MouseEvent&) override { view.say (juce::String (laneName (id)) + theme::dot + laneHelp (id)); }
+    void mouseExit (const juce::MouseEvent&) override { view.say ({}); }
 
     PresetEditorView& view;
     const L id;
     std::unique_ptr<TypeSelector> type;
-    TextKey option { "" }, remove { juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) };
+    TextKey option { "" }, remove { u8 ("\xc3\x97") };
     float intensity = 1.f;
-    bool hot = false;
+};
+
+// ---- The gestures and keys, at a glance -----------------------------------------------
+
+// Over the lanes while SHORTCUTS is on: Live's automation gestures and keys
+// as this editor has them, in groups. A click anywhere (or Esc) closes it.
+struct PresetEditorView::Shortcuts : juce::Component
+{
+    struct Line
+    {
+        juce::String keys, does;
+    };
+    struct Group
+    {
+        juce::String name;
+        std::vector<Line> lines;
+    };
+
+    explicit Shortcuts (PresetEditorView& v) : view (v)
+    {
+        setOpaque (true);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        const auto lr = u8 ("\xe2\x86\x90 \xe2\x86\x92"), ud = u8 ("\xe2\x86\x91 \xe2\x86\x93");
+        columns = {
+            { { "Draw Mode",
+                { { "B", "Draw Mode on or off" },
+                  { "hold B", "Draw Mode for one gesture" },
+                  { "drag", "draws steps one grid cell wide" },
+                  { "Shift-drag", "finer values" },
+                  { kNoSnap + "-drag", "freehand, off the grid" } } },
+              { "Breakpoints",
+                { { "click the line", "adds one" },
+                  { "double-click off it", "adds one there" },
+                  { "click one", "deletes it" },
+                  { "drag one", "moves it (the selected ones follow)" },
+                  { "Shift-drag", "one direction, finer" },
+                  { kNoSnap + "-drag", "no snap" },
+                  { "right-click", "Edit Value, Add Value" } } },
+              { "Segments",
+                { { "click near, Shift-click", "grabs it: drag to move it" },
+                  { kOpt + "-drag", "curves it" },
+                  { kOpt + "-double-click", "straightens it" } } } },
+            { { "Time selection",
+                { { "drag the background", "selects (across lanes)" },
+                  { "Shift-click", "extends it" },
+                  { "side handles", "stretch in time (Shift: the rest moves)" },
+                  { "top, bottom handles", "stretch the values" },
+                  { "corner handles", "skew (" + kOpt + ": mirrored)" },
+                  { "right-click", "shapes, Simplify Envelope" },
+                  { kCmd + " C X V D", "copy, cut, paste, duplicate" },
+                  { "Delete, " + kCmd + " A", "clear it, select all" } } },
+              { "Zoom and scroll",
+                { { "pinch, " + kCmd + "-scroll", "zoom in and out" },
+                  { "swipe, Shift-scroll", "scroll along the build" },
+                  { "Z, X", "zoom to the selection, and back" },
+                  { "+, -, W", "zoom in, out, all of it" },
+                  { "drag the overview", "scroll; down or up zooms" },
+                  { "drag the ruler", "scrubs BUILD" } } } },
+            { { "Keyboard",
+                { { "click the background", "puts the insert marker there" },
+                  { lr, "marker or selection, a grid step" },
+                  { "Shift " + lr, "resizes the selection" },
+                  { kOpt + " " + lr, "previous, next breakpoint" },
+                  { ud, "previous, next lane" },
+                  { "Enter", "selects or adds a breakpoint" },
+                  { "Tab, Shift-Tab", "next, previous breakpoint" },
+                  { lr + " " + ud + ", 0-9", "move it, change its value" },
+                  { "Enter, Esc, Delete", "keep, take back, remove" } } },
+              { "Grid and more",
+                { { kCmd + " 1, " + kCmd + " 2", "narrower, wider grid" },
+                  { kCmd + " 3, 4, 5", "triplets, snap, adaptive" },
+                  { kCmd + " Delete", "removes the lane" },
+                  { kCmd + " Z, " + kCmd + " Shift Z", "undo, redo" },
+                  { kCmd + " S, " + kCmd + " Shift S", "save, save as" } } } },
+        };
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (col::sheet);
+        const auto b = getLocalBounds().toFloat();
+        g.setColour (col::hairline);
+        g.drawRoundedRectangle (b.reduced (0.5f), kRadius, 1.f);
+        const auto inner = b.reduced (20.f, 16.f);
+        caption (g, "Mouse and keys: Ableton Live's automation editing", inner.withHeight (15.f), juce::Justification::centredLeft, col::ink, 10.f);
+        caption (g, "Click anywhere or Esc to close", inner.withHeight (15.f), juce::Justification::centredRight, col::inkFaint, 9.f);
+
+        // Rows as tall as the room allows, 15 to 19 px.
+        size_t most = 0;
+        for (const auto& c : columns)
+        {
+            size_t n = 0;
+            for (const auto& grp : c) n += grp.lines.size();
+            most = std::max (most, n);
+        }
+        size_t groups = 0;
+        for (const auto& c : columns) groups = std::max (groups, c.size());
+        const float top = inner.getY() + 34.f, heads = (float) groups * 36.f;   // a group's name and rule, the gap after it
+        const float lineH = juce::jlimit (13.f, 19.f, (inner.getBottom() - top - heads) / (float) most);
+        const float colGap = 28.f, colW = (inner.getWidth() - colGap * (float) (columns.size() - 1)) / (float) columns.size();
+        for (size_t c = 0; c < columns.size(); ++c)
+        {
+            const float x = inner.getX() + (float) c * (colW + colGap);
+            float y = top;
+            const float keysW = std::min (132.f, colW * 0.42f);
+            for (const auto& grp : columns[c])
+            {
+                caption (g, grp.name, { x, y, colW, 14.f }, juce::Justification::centredLeft, col::inkSoft, 9.5f);
+                g.setColour (col::hairline);
+                g.fillRect (x, y + 17.f, colW, 1.f);
+                y += 24.f;
+                for (const auto& l : grp.lines)
+                {
+                    g.setFont (mono (10.f));
+                    g.setColour (col::ink);
+                    g.drawText (l.keys, juce::Rectangle<float> (x, y, keysW - 8.f, lineH), juce::Justification::centredLeft, true);
+                    g.setFont (title (12.5f));
+                    g.setColour (col::inkSoft);
+                    g.drawText (l.does, juce::Rectangle<float> (x + keysW, y, colW - keysW, lineH), juce::Justification::centredLeft, true);
+                    y += lineH;
+                }
+                y += 12.f;
+            }
+        }
+    }
+
+    void mouseDown (const juce::MouseEvent&) override { view.showShortcuts (false); }
+
+    PresetEditorView& view;
+    std::vector<std::vector<Group>> columns;
 };
 
 // One undo step: the preset that was on, and its slot, before and after.
@@ -199,17 +347,20 @@ struct PresetEditorView::Step : juce::UndoableAction
 
 PresetEditorView::PresetEditorView (BuildAppProcessor& p)
     : proc (p),
-      presetMenu (p.param (ids::preset), "Preset", presetmenu::choices()),
+      presetMenu (p.param (ids::preset), "", presetmenu::choices()),
       gridMenu ("Grid", gridChoices()),
-      undoKey ("Undo", "Undoes the last change to the preset (Cmd Z)."),
-      redoKey ("Redo", "Does it again (Cmd Shift Z)."),
-      saveKey ("Save", "Writes the preset to its file in your library (Cmd S)."),
-      saveAsKey (juce::String (juce::CharPointer_UTF8 ("Save as\xe2\x80\xa6")), "Keeps it in your library under a name of its own (Cmd Shift S); it then shows under USER in the preset menu of every project."),
+      undoKey ("Undo", "Undoes the last change to the preset (" + kCmd + " Z)."),
+      redoKey ("Redo", "Does it again (" + kCmd + " Shift Z)."),
+      keysKey ("Shortcuts", "Every gesture and key of the lanes, as in Ableton Live's automation lanes."),
+      saveKey ("Save", "Writes the preset to its file in your library (" + kCmd + " S)."),
+      saveAsKey (u8 ("Save as\xe2\x80\xa6"), "Keeps it in your library under a name of its own (" + kCmd + " Shift S); it then shows under USER in the preset menu of every project."),
       revertKey ("Revert", "Back to the preset as it was saved (or to the factory preset it was copied from)."),
-      drawKey ("Draw", "Draw Mode (B, or hold B while you edit): drag to draw steps one grid cell wide; Shift finer; Cmd (Alt on Windows) freehand."),
-      snapKey ("Snap", "Keys and drawing snap to the grid (Cmd 4); Cmd (Alt on Windows) bypasses it while you drag."),
-      tripletKey ("Triplet", "A triplet grid: two thirds of each step (Cmd 3)."),
-      addKey ("+ Lane", "Gives the preset a lane for another control.")
+      drawKey ("Draw", "Draw Mode (B, or hold B while you edit): drag to draw steps one grid cell wide; Shift finer; " + kNoSnap + " freehand."),
+      adaptiveKey ("Adaptive", "On: the grid follows the zoom, as Live's zoom-adaptive grid (" + kCmd + " 5); " + kCmd + " 1 / " + kCmd
+                                   + " 2 or < > make it denser or wider. Off: the grid stays at the size you pick."),
+      snapKey ("Snap", "Breakpoints and drawing snap to the grid (" + kCmd + " 4); " + kNoSnap + " bypasses it while you drag."),
+      tripletKey ("Triplet", "A triplet grid: two thirds of each step (" + kCmd + " 3)."),
+      addKey ("+ Add lane", "Gives the preset a lane for another control: it then follows that lane instead of your knob.")
 {
     setLookAndFeel (&lnf);
     setOpaque (true);
@@ -221,19 +372,22 @@ PresetEditorView::PresetEditorView (BuildAppProcessor& p)
     presetMenu.onHover = [this] (TypeSelector* s, bool on) { say (on ? s->getHelp() : juce::String()); };
     gridMenu.setSteppers (true);
     gridMenu.setIndex (lanesView.grid());
-    gridMenu.onChoose = [this] (int g) { lanesView.setGrid (g); };
+    gridMenu.onChoose = [this] (int g) { lanesView.setGrid (g); };      // a size from the menu: a fixed grid
+    gridMenu.step = [this] (int dir) { dir > 0 ? lanesView.narrower() : lanesView.wider(); };   // < >: as Cmd 2 / Cmd 1
     gridMenu.onHover = [this] (TypeSelector* s, bool on) { say (on ? s->getHelp() : juce::String()); };
 
-    undoKey.onClick = [this] { undo.undo(); updateKeys(); };
-    redoKey.onClick = [this] { undo.redo(); updateKeys(); };
+    undoKey.onClick = [this] { undoOrRedo (false); };
+    redoKey.onClick = [this] { undoOrRedo (true); };
+    keysKey.onClick = [this] { showShortcuts (shortcuts == nullptr); };
     saveKey.onClick = [this] { save(); };
     saveAsKey.onClick = [this] { saveAs(); };
     revertKey.onClick = [this] { revert(); };
     drawKey.onClick = [this] { lanesView.setDrawMode (! lanesView.drawMode()); };
+    adaptiveKey.onClick = [this] { lanesView.setAdaptive (! lanesView.adaptive()); };
     snapKey.onClick = [this] { lanesView.setSnap (! lanesView.snaps()); };
     tripletKey.onClick = [this] { lanesView.setTriplets (! lanesView.triplets()); };
     addKey.onClick = [this] { showLaneMenu(); };
-    for (auto* k : { &undoKey, &redoKey, &saveKey, &saveAsKey, &revertKey, &drawKey, &snapKey, &tripletKey, &addKey })
+    for (auto* k : { &undoKey, &redoKey, &keysKey, &saveKey, &saveAsKey, &revertKey, &drawKey, &adaptiveKey, &snapKey, &tripletKey, &addKey })
     {
         k->onHover = [this] (TextKey* key, bool on) { say (on ? key->getHelp() : juce::String()); };
         addAndMakeVisible (*k);
@@ -242,15 +396,16 @@ PresetEditorView::PresetEditorView (BuildAppProcessor& p)
         gridMenu.setIndex (lanesView.grid());
         updateKeys();
     };
+    lanesView.onScroll = [this] { layoutHeaders(); };
 
     for (auto* t : { &description, &nameEntry })
     {
         t->setFont (mono (10.5f));
-        t->setIndents (6, 3);
+        t->setIndents (6, 4);
         t->setColour (juce::TextEditor::backgroundColourId, col::sheet);
         t->setColour (juce::TextEditor::outlineColourId, col::hairline);
     }
-    description.setTextToShowWhenEmpty ("One line on what this preset does (it shows in the footer)", col::inkFaint);
+    description.setTextToShowWhenEmpty ("What this preset does, in one line (the main window's footer shows it)", col::inkFaint);
     description.onTextChange = [this] {
         if (! before) beginEdit();
         if (! ensureSlot())
@@ -272,7 +427,8 @@ PresetEditorView::PresetEditorView (BuildAppProcessor& p)
     nameEntry.onFocusLost = [this] { finishName (false); };
     nameEntry.setVisible (false);
 
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &presetMenu, &gridMenu, &description, &lanesView })
+    headerColumn.setInterceptsMouseClicks (false, true);
+    for (juce::Component* c : std::initializer_list<juce::Component*> { &presetMenu, &gridMenu, &description, &lanesView, &headerColumn })
         addAndMakeVisible (c);
     addChildComponent (nameEntry);
 
@@ -283,6 +439,7 @@ PresetEditorView::PresetEditorView (BuildAppProcessor& p)
 
 PresetEditorView::~PresetEditorView()
 {
+    shortcuts.reset();
     headers.clear();
     setLookAndFeel (nullptr);
 }
@@ -310,6 +467,7 @@ void PresetEditorView::change (L id, const ba::Lane& l)
     ba::lane (working, id) = l;
     publish();
     lanesView.contentChanged();
+    for (auto& h : headers) h->repaint();   // their values
 }
 
 void PresetEditorView::endEdit (const juce::String& what)
@@ -325,6 +483,14 @@ void PresetEditorView::endEdit (const juce::String& what)
     undo.beginNewTransaction (what);
     undo.perform (new Step (*this, std::move (was), std::move (now)));
     updateKeys();
+}
+
+void PresetEditorView::cancelEdit()
+{
+    if (! before) return;
+    auto was = std::move (*before);
+    before.reset();
+    restore (was);
 }
 
 float PresetEditorView::build() const { return proc.buildAmount(); }
@@ -450,7 +616,8 @@ void PresetEditorView::publish()
     proc.user.set (slot, s);
     meta = proc.user[slot];
     shownGen = proc.user.generation();
-    repaint (0, 0, getWidth(), (int) kRuleY);   // the unsaved mark and the badge
+    repaint (0, 0, getWidth(), (int) kRuleY);   // the status beside the menu
+    updateKeys();
 }
 
 PresetEditorView::Snapshot PresetEditorView::snapshot() const
@@ -484,6 +651,7 @@ void PresetEditorView::restore (const Snapshot& s)
 
 void PresetEditorView::edit (const juce::String& what, const std::function<void()>& change)
 {
+    lanesView.commitKeys();
     beginEdit();
     if (! ensureSlot())
     {
@@ -499,6 +667,7 @@ void PresetEditorView::edit (const juce::String& what, const std::function<void(
 
 void PresetEditorView::addLane (L id)
 {
+    if (ba::hasLane (working, id)) return;
     const auto own = proc.ownSettings();
     edit ("Add lane", [&] {
         auto& p = working;
@@ -578,10 +747,25 @@ void PresetEditorView::showLaneMenu()
                      });
 }
 
+void PresetEditorView::showShortcuts (bool on)
+{
+    if (on == (shortcuts != nullptr)) return;
+    if (on)
+    {
+        shortcuts = std::make_unique<Shortcuts> (*this);
+        addAndMakeVisible (*shortcuts);
+        shortcuts->setBounds (lanesArea().withTrimmedLeft (0));
+    }
+    else shortcuts.reset();
+    keysKey.setOn (on);
+    grabKeyboardFocus();
+}
+
 // ---- Saving ------------------------------------------------------------------------------
 
 void PresetEditorView::save()
 {
+    lanesView.commitKeys();
     if (slot < 0)
     {
         say ("A factory preset is kept as it is: change it, then SAVE AS keeps your version.");
@@ -609,7 +793,8 @@ void PresetEditorView::save()
 
 void PresetEditorView::saveAs()
 {
-    nameEntry.setBounds (presetMenu.getBounds().withX (presetMenu.getX() + (int) presetMenu.choiceX() - 6).withWidth ((int) presetMenu.widestChoice() + 40).expanded (0, 2));
+    lanesView.commitKeys();
+    nameEntry.setBounds (presetMenu.getBounds().withX (presetMenu.getX() + (int) presetMenu.choiceX() - 6).withWidth ((int) presetMenu.widestChoice() + 40).expanded (0, 3));
     nameEntry.setText (meta.name.isNotEmpty() ? meta.name : "My preset", false);
     nameEntry.setVisible (true);
     nameEntry.selectAll();
@@ -680,6 +865,14 @@ void PresetEditorView::revert()
     description.setText (meta.help, false);
 }
 
+void PresetEditorView::undoOrRedo (bool redo)
+{
+    lanesView.commitKeys();
+    if (redo) undo.redo();
+    else undo.undo();
+    updateKeys();
+}
+
 // ---- Headers, keys, the tick ----------------------------------------------------------------
 
 void PresetEditorView::rebuildHeaders()
@@ -705,7 +898,7 @@ void PresetEditorView::rebuildHeaders()
         for (const auto id : rows)
         {
             v.headers.push_back (std::make_unique<Header> (v, id));
-            v.addAndMakeVisible (*v.headers.back());
+            v.headerColumn.addAndMakeVisible (*v.headers.back());
         }
         v.layoutHeaders();
     });
@@ -713,9 +906,9 @@ void PresetEditorView::rebuildHeaders()
 
 void PresetEditorView::layoutHeaders()
 {
+    const float top = (float) lanesView.getY() + LaneEditor::kTop;
     for (size_t i = 0; i < headers.size(); ++i)
-        headers[i]->setBounds (juce::Rectangle<float> ((float) kLeft, (float) lanesView.getY() + lanesView.rowTop ((int) i), (float) kHeaderW,
-                                                       lanesView.rowHeight())
+        headers[i]->setBounds (juce::Rectangle<float> (0.f, (float) lanesView.getY() + lanesView.rowTop ((int) i) - top, (float) kHeaderW, lanesView.rowHeight())
                                    .toNearestInt());
 }
 
@@ -727,16 +920,29 @@ void PresetEditorView::updateKeys()
     saveAsKey.setUsable (slot >= 0 || shownPreset > 0);
     revertKey.setUsable (slot >= 0 && meta.unsaved);
     drawKey.setOn (lanesView.drawMode());
+    adaptiveKey.setOn (lanesView.adaptive());
     snapKey.setOn (lanesView.snaps());
     tripletKey.setOn (lanesView.triplets());
     addKey.setUsable ((int) lanes().size() < ba::kLaneCount);
-    const auto s = "Grid " + LaneEditor::gridName (lanesView.grid()) + (lanesView.triplets() ? " T" : "") + theme::dot
-                   + (lanesView.snaps() ? "Snap" : "No snap") + theme::dot + (lanesView.drawMode() ? "Draw" : "Breakpoints");
-    if (s != state)
+    addKey.setOn (lanes().empty());   // where to start
+    if (const auto s = startsAt(); s != state)
     {
         state = s;
         repaint (footerArea());
     }
+}
+
+juce::String PresetEditorView::status() const
+{
+    if (slot >= 0) return meta.file == juce::File() ? "Not saved" : meta.unsaved ? "Unsaved" : "Saved";
+    const int i = proc.presetIndex();
+    return i >= 1 && i <= P::kFactory ? "Factory" : juce::String();
+}
+
+juce::String PresetEditorView::startsAt() const
+{
+    if (lanes().empty()) return {};
+    return ba::restsAtZero (working) ? "BUILD 0 is the drop" : "Starts at a setting";
 }
 
 juce::String PresetEditorView::defaultHelp() const
@@ -750,13 +956,18 @@ juce::String PresetEditorView::defaultHelp() const
     }
     if (i >= 1 && i <= P::kFactory)
         return juce::String (ba::kPresets[(size_t) i - 1].name) + " is a factory preset: your first change makes a copy of it to edit.";
-    return "No preset is on: + LANE starts a new one, or pick one in the menu to edit it.";
+    return "No preset is on: + ADD LANE starts a new one, or pick one in the menu to edit it.";
 }
 
 void PresetEditorView::tick()
 {
     if (proc.presetIndex() != shownPreset || proc.user.generation() != shownGen) load();
     lanesView.refresh();
+    if (const float b = proc.buildAmount(); b != shownBuild)
+    {
+        shownBuild = b;
+        for (auto& h : headers) h->repaint();   // their values at BUILD
+    }
     // The knobs under it and the intensities change what plays: redraw then.
     const auto k = proc.intensity();
     const auto own = proc.ownSettings();
@@ -766,7 +977,11 @@ void PresetEditorView::tick()
     {
         shownRun = now;
         lanesView.contentChanged();
-        for (auto& h : headers) h->refresh();
+        for (auto& h : headers)
+        {
+            h->refresh();
+            h->repaint();
+        }
     }
     if (helpIsDefault && help != defaultHelp())
     {
@@ -779,17 +994,19 @@ bool PresetEditorView::keyPressed (const juce::KeyPress& k)
 {
     const auto mods = k.getModifiers();
     const auto c = upper (k.getKeyCode());
+    if (shortcuts != nullptr && k.isKeyCode (juce::KeyPress::escapeKey))
+    {
+        showShortcuts (false);
+        return true;
+    }
     if (mods.isCommandDown() && c == 'Z')
     {
-        if (mods.isShiftDown()) undo.redo();
-        else undo.undo();
-        updateKeys();
+        undoOrRedo (mods.isShiftDown());
         return true;
     }
     if (mods.isCommandDown() && c == 'Y')
     {
-        undo.redo();
-        updateKeys();
+        undoOrRedo (true);
         return true;
     }
     if (mods.isCommandDown() && c == 'S')
@@ -805,44 +1022,66 @@ bool PresetEditorView::keyStateChanged (bool down) { return lanesView.keyStateCh
 
 // ---- Layout and painting --------------------------------------------------------------------
 
+juce::Rectangle<int> PresetEditorView::lanesArea() const
+{
+    return { kLeft, (int) kLanesY, getWidth() - 2 * kLeft, getHeight() - kFooter - (int) kLanesY };
+}
+
 void PresetEditorView::resized()
 {
-    const int w = getWidth(), h = getHeight();
+    const int w = getWidth();
+    const int content = kLeft + kHeaderW + (int) LaneEditor::kGap;   // where the rows' paper starts: everything the left column labels lines up there
+
+    // Masthead: the shortcuts, then undo / redo, right-aligned.
     int x = w - kLeft;
-    for (auto* k : { &saveKey, &saveAsKey, &revertKey })
-    {
-        x -= k->idealWidth();
-        k->setBounds (x, 20, k->idealWidth(), 22);
-        x -= 6;
-    }
-    x -= 14;
     for (auto* k : { &redoKey, &undoKey })
     {
         x -= k->idealWidth();
-        k->setBounds (x, 20, k->idealWidth(), 22);
-        x -= 6;
+        k->setBounds (x, 20, k->idealWidth(), kRowH);
+        x -= kKeyGap;
     }
-    presetMenu.setBounds (kLeft, (int) kPresetY - 2, presetMenu.idealWidth(), 17);
-    const int badge = 190;
-    description.setBounds (presetMenu.getRight() + 18, (int) kPresetY - 4, w - kLeft - badge - 12 - (presetMenu.getRight() + 18), 21);
+    x -= kGroupGap - kKeyGap;
+    keysKey.setBounds (x - keysKey.idealWidth(), 20, keysKey.idealWidth(), kRowH);
 
-    // The tag row: [A] LANES, then the tools.
-    x = kLeft + 92;
-    for (juce::Component* c : std::initializer_list<juce::Component*> { &drawKey, &gridMenu, &snapKey, &tripletKey, &addKey })
+    // [A] Preset: the menu (its words where the rows start), the status, the help line, the file keys.
+    const int ya = (int) kRowA;
+    x = w - kLeft;
+    for (auto* k : { &saveKey, &saveAsKey, &revertKey })
     {
-        const int cw = c == &gridMenu ? gridMenu.idealWidth() : dynamic_cast<TextKey*> (c)->idealWidth();
-        c->setBounds (x, (int) kTagY - 2, cw, 17);
-        x += cw + (c == &gridMenu || c == &tripletKey ? 18 : 8);
+        x -= k->idealWidth();
+        k->setBounds (x, ya, k->idealWidth(), kRowH);
+        x -= kKeyGap;
     }
+    presetMenu.setBounds (content - (int) presetMenu.choiceX(), ya + 2, presetMenu.idealWidth(), 18);
+    description.setBounds (content, (int) kRowA2, w - kLeft - content, kRowH);
 
-    lanesView.setBounds (kLeft + kHeaderW + kHeaderGap, (int) kLanesY, w - kLeft - (kLeft + kHeaderW + kHeaderGap), h - (int) kFooter - (int) kLanesY);
+    // [B] Lanes: the tools over the rows, in groups.
+    const int yb = (int) kRowB;
+    x = content;
+    drawKey.setBounds (x, yb, drawKey.idealWidth(), kRowH);
+    x = drawKey.getRight() + kGroupGap;
+    gridMenu.setBounds (x, yb + 2, gridMenu.idealWidth(), 18);
+    x = gridMenu.getRight() + 10;
+    adaptiveKey.setBounds (x, yb, adaptiveKey.idealWidth(), kRowH);
+    x = adaptiveKey.getRight() + kKeyGap;
+    tripletKey.setBounds (x, yb, tripletKey.idealWidth(), kRowH);
+    x = tripletKey.getRight() + kKeyGap;
+    snapKey.setBounds (x, yb, snapKey.idealWidth(), kRowH);
+
+    // The lanes: + ADD LANE over the headers, the headers beside the rows.
+    const auto lanes = lanesArea();
+    addKey.setBounds (kLeft, lanes.getY() + (int) LaneEditor::kOverview, addKey.idealWidth(), 18);   // beside the ruler
+    lanesView.setBounds (lanes.withTrimmedLeft (kHeaderW));
+    headerColumn.setBounds (kLeft, lanes.getY() + (int) LaneEditor::kTop, kHeaderW, lanes.getHeight() - (int) LaneEditor::kTop);
     layoutHeaders();
+    if (shortcuts != nullptr) shortcuts->setBounds (lanes);
 }
 
 void PresetEditorView::paint (juce::Graphics& g)
 {
     g.fillAll (col::sheet);
     const auto b = getLocalBounds().toFloat();
+    const float w = b.getWidth();
     cropMarks (g, b.reduced (8.f), 7.f);
 
     // Wordmark and what this window is.
@@ -857,63 +1096,86 @@ void PresetEditorView::paint (juce::Graphics& g)
     }
     g.setFont (mono (9.5f));
     g.setColour (col::inkSoft);
-    g.drawText (juce::String (juce::CharPointer_UTF8 ("PRESET EDITOR \xc2\xb7 DRAW AND BEND EVERY LANE \xc2\xb7 LIVE'S GESTURES AND KEYS")),
-                juce::Rectangle<float> ((float) kLeft, 40.f, 520.f, 14.f), juce::Justification::centredLeft, false);
+    g.drawText (u8 ("PRESET EDITOR \xc2\xb7 EVERY LANE ALONG BUILD \xc2\xb7 EDITED LIKE AUTOMATION IN ABLETON LIVE"),
+                juce::Rectangle<float> ((float) kLeft, 40.f, 560.f, 14.f), juce::Justification::centredLeft, false);
     g.setColour (col::inkFaint);
-    g.fillRect ((float) kLeft, kMastRuleY, b.getWidth() - 2.f * kLeft, 1.5f);
+    g.fillRect ((float) kLeft, kMastRuleY, w - 2.f * kLeft, 1.5f);
 
-    // The preset row: unsaved mark, and whether BUILD 0 leaves the signal alone.
-    if (slot >= 0 && meta.unsaved)
+    // [A] Preset, and its status beside the menu.
+    const float rowMid = (float) kRowH * 0.5f;
+    sectionTag (g, "A", "Preset", { (float) kLeft, kRowA + rowMid - 6.5f });
+    if (const auto s = status(); s.isNotEmpty())
     {
-        g.setColour (col::ink);
-        g.fillEllipse (juce::Rectangle<float> (5.f, 5.f).withCentre ({ (float) presetMenu.getRight() + 8.f, kPresetY + 6.5f }));
+        const bool open = s == "Unsaved" || s == "Not saved";
+        float sx = (float) presetMenu.getRight() + 14.f;
+        if (open)
+        {
+            g.setColour (col::ink);
+            g.fillEllipse (juce::Rectangle<float> (5.f, 5.f).withCentre ({ sx + 2.5f, kRowA + rowMid }));
+            sx += 11.f;
+        }
+        caption (g, s, { sx, kRowA, 90.f, (float) kRowH }, juce::Justification::centredLeft, open ? col::ink : col::inkFaint, 9.5f);
     }
-    const bool any = ! lanes().empty();
-    const bool rests = ba::restsAtZero (working);
-    caption (g, ! any ? "Nothing driven yet" : rests ? "BUILD 0 is the drop" : "Starts at a setting",
-             { b.getWidth() - (float) kLeft - 190.f, kPresetY - 2.f, 190.f, 17.f }, juce::Justification::centredRight,
-             any && rests ? col::ink : col::inkSoft, 9.5f);
+    caption (g, "Description", { (float) kLeft + 19.f, kRowA2, (float) kHeaderW - 19.f, (float) kRowH }, juce::Justification::centredLeft, col::inkSoft, 9.5f);
     g.setColour (col::hairline);
-    g.fillRect ((float) kLeft, kRuleY, b.getWidth() - 2.f * kLeft, 1.f);
+    g.fillRect ((float) kLeft, kRuleY, w - 2.f * kLeft, 1.f);
 
-    sectionTag (g, "A", "Lanes", { (float) kLeft, kTagY });
-
-    // Legend, right-aligned on the tag row: what each line in the lanes is.
+    // [B] Lanes, a hairline between its groups of tools, the legend right.
+    sectionTag (g, "B", "Lanes", { (float) kLeft, kRowB + rowMid - 6.5f });
+    g.setColour (col::hairline);
+    for (const float gx : { (float) drawKey.getRight() + (float) kGroupGap * 0.5f })
+        g.fillRect (gx, kRowB + 3.f, 1.f, (float) kRowH - 6.f);
     {
-        float lx = b.getWidth() - (float) kLeft;
-        const auto item = [&] (const juce::String& name, const std::function<void (juce::Rectangle<float>)>& swatch) {
-            g.setFont (label (9.f));
-            const float w = textWidth (g.getCurrentFont(), name.toUpperCase());
-            lx -= w;
-            caption (g, name, { lx, kTagY, w + 2.f, 13.f }, juce::Justification::centredLeft, col::inkSoft, 9.f);
-            lx -= 22.f;
-            swatch ({ lx, kTagY + 6.f, 16.f, 1.f });
-            lx -= 18.f;
+        struct Item
+        {
+            const char* name;
+            std::function<void (juce::Rectangle<float>)> swatch;
         };
-        item ("Tail", [&] (auto r) {
-            juce::Graphics::ScopedSaveState s (g);
-            const auto box = r.withTop (r.getY() - 4.f).withHeight (9.f);
-            g.reduceClipRegion (box.toNearestInt());
-            hatch (g, box, col::inkFaint, 4.f, 1.f);
-        });
-        item ("Played", [&] (auto r) {
-            g.setColour (col::inkSoft);
-            for (float dx = 0.f; dx < 16.f; dx += 6.f) g.fillRect (r.getX() + dx, r.getY() - 0.5f, 3.f, 1.2f);
-        });
-        item ("Built", [&] (auto r) { g.setColour (col::accent); g.fillRect (r.withHeight (1.8f).translated (0.f, -0.5f)); });
-        item ("Path", [&] (auto r) { g.setColour (col::ink); g.fillRect (r.withHeight (1.4f).translated (0.f, -0.5f)); });
+        const Item items[] = {
+            { "Path", [&] (auto r) { g.setColour (col::ink); g.fillRect (r.withHeight (1.4f).translated (0.f, -0.5f)); } },
+            { "Built so far", [&] (auto r) { g.setColour (col::accent); g.fillRect (r.withHeight (1.8f).translated (0.f, -0.5f)); } },
+            { "At intensity", [&] (auto r) {
+                  g.setColour (col::inkSoft);
+                  for (float dx = 0.f; dx < 16.f; dx += 6.f) g.fillRect (r.getX() + dx, r.getY() - 0.5f, 3.f, 1.2f);
+              } },
+            { "Tail", [&] (auto r) {
+                  juce::Graphics::ScopedSaveState s (g);
+                  const auto box = r.withTop (r.getY() - 4.f).withHeight (9.f);
+                  g.reduceClipRegion (box.toNearestInt());
+                  hatch (g, box, col::inkFaint, 4.f, 1.f);
+              } },
+        };
+        // As many as fit after the tools, from the left: the tail is named on the ruler anyway.
+        const float room = w - (float) kLeft - ((float) snapKey.getRight() + (float) kGroupGap);
+        const auto widthOf = [] (const char* n) { return textWidth (label (9.f), juce::String (n).toUpperCase()) + 22.f; };
+        size_t n = std::size (items);
+        float need = 0.f;
+        for (size_t i = 0; i < n; ++i) need += widthOf (items[i].name) + (i > 0 ? 18.f : 0.f);
+        while (n > 0 && need > room)
+        {
+            --n;
+            need -= widthOf (items[n].name) + (n > 0 ? 18.f : 0.f);
+        }
+        float lx = w - (float) kLeft - need;
+        const float ly = kRowB + rowMid;
+        for (size_t i = 0; i < n; ++i)
+        {
+            items[i].swatch ({ lx, ly, 16.f, 1.f });
+            const float tw = widthOf (items[i].name) - 22.f;
+            caption (g, items[i].name, { lx + 22.f, ly - 7.f, tw + 2.f, 14.f }, juce::Justification::centredLeft, col::inkSoft, 9.f);
+            lx += tw + 22.f + 18.f;
+        }
     }
 
-    // Footer.
+    // Footer: the help line, and what BUILD 0 does with this preset.
     g.setColour (col::hairline);
-    g.fillRect ((float) kLeft, b.getHeight() - 34.f, b.getWidth() - 2.f * kLeft, 1.f);
+    g.fillRect ((float) kLeft, b.getHeight() - 34.f, w - 2.f * kLeft, 1.f);
     const auto foot = footerArea().toFloat();
     g.setFont (mono (10.5f));
     g.setColour (col::ink);
-    g.drawText (help, foot.withTrimmedRight (240.f), juce::Justification::centredLeft, true);
-    g.setFont (mono (9.5f));
-    g.setColour (col::inkFaint);
-    g.drawText (state.toUpperCase(), foot, juce::Justification::centredRight, false);
+    g.drawText (help, foot.withTrimmedRight (state.isEmpty() ? 0.f : 170.f), juce::Justification::centredLeft, true);
+    if (state.isNotEmpty())
+        caption (g, state, foot, juce::Justification::centredRight, state == "BUILD 0 is the drop" ? col::inkSoft : col::inkFaint, 9.5f);
 }
 
 // ---- The window ---------------------------------------------------------------------------------

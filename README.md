@@ -36,8 +36,9 @@ With every knob at rest (low cut left, high cut right, everything else at
 zero, stereo 100 %, level 0 dB, dry/wet 100 %) the signal passes bit for bit:
 each stage at rest is skipped, not run at unity.
 
-Every knob drags up/down (Shift for fine), takes the mouse wheel, types a value
-on double-click (`340`, `4.2k`, `-6`, `off`) and resets on Alt/Cmd-click. The
+Every knob drags up/down (Shift for fine), takes the mouse wheel and resets on
+double-click or Alt/Cmd-click. Double-click the number under a knob to type a
+value (`340`, `4.2k`, `-6`, `off`). The
 cut markers in the spectrum can be dragged sideways too; drag one past the edge
 of the plot, or double-click it, to switch that filter off. The preset and the
 two cut-type menus have `<` `>` keys on their right to step through the list
@@ -181,38 +182,62 @@ lanes the way you edit automation in Ableton Live. Every change plays at once.
   under **USER** in the preset menu of every project, and the `<` `>` keys walk
   through your library after the factory presets. **SAVE** writes it again,
   **REVERT** goes back to what was saved (or to the factory preset it was
-  copied from). A dot marks unsaved changes.
+  copied from). Beside the menu it says where the preset stands: *Factory*,
+  *● Unsaved*, *● Not saved* (never saved to your library) or *Saved*.
 - **The project keeps every user preset it uses**, so it plays the same on
   another machine or after the file is gone. PRESET has 16 user slots after the
   factory presets (*User 1* to *User 16* to the host), so one instance can
   switch between up to 16 presets of your own, automation included.
-- **The window**: the lanes over BUILD. 0 to 75 % is the path you edit; the
-  tail past it is the same for every preset and shows hatched. Each lane has a
-  header: its cut type and **AUTO** resonance (cuts), **STEPS** (pitch: whole
-  semitones), **×** to take the lane out. **+ LANE** adds a control the preset
-  doesn't take yet. A lane its intensity knob turns down shows what plays,
-  dashed. The badge on the right says whether BUILD 0 is still the drop.
+- **The window** has two sections under UNDO, REDO and **SHORTCUTS** (every
+  gesture and key below, at a glance). **A — Preset**: the menu, where it
+  stands, REVERT, SAVE AS, SAVE, and its description (the main window's
+  footer shows it). **B — Lanes**: the tools (DRAW, the grid, ADAPTIVE,
+  TRIPLET, SNAP), the overview strip and the ruler, then a row per lane over
+  BUILD. 0 to 75 % is the path you edit; the tail
+  past it is the same for every preset and shows hatched. Each lane's header
+  shows its name and what it plays at BUILD now, its cut type and **AUTO**
+  resonance (cuts), **STEPS** (pitch: whole semitones) and **×** to take the
+  lane out. **+ ADD LANE** above the headers adds a control the preset doesn't
+  take yet. A lane its intensity knob turns down shows what plays, dashed.
+  With more lanes than room the rows scroll (wheel). The footer says what the
+  thing under the mouse does, and on the right whether BUILD 0 is still the
+  drop.
 
-Mouse and keys, as in Live (on Windows Cmd is Ctrl, Option is Alt):
+Mouse and keys, as in Ableton Live's automation lanes (on Windows Cmd is
+Ctrl, Option is Alt, and Alt is what bypasses the snap):
 
 | | |
 |---|---|
 | **B** | Draw Mode on or off; hold B to flip it for one gesture |
 | Drag, in Draw Mode | draws steps one grid cell wide; Shift finer; Cmd (Alt on Windows) draws freehand |
-| Click the line | adds a key there (and drags it) |
-| Double-click off the line | adds a key where you clicked |
-| Click a key | deletes it |
-| Drag a key | moves it, the selected keys with it; it snaps to the grid and to its neighbours' times (Cmd, Alt on Windows: no snap; Shift: one axis, finer). Drag it over a neighbour to remove that one |
-| Drag near a segment, or Shift-drag it | moves the segment; inside a time selection the selected part moves as one |
-| Option-drag a segment | bends it (the curve follows the mouse); Option-double-click straightens it |
-| Drag the background | a time selection, across lanes too. Its handles stretch it (top and bottom, left and right) and skew it (corners); Shift finer, Option both sides |
-| Right-click | Edit Value / Add Value (type it in the knob's words: *400 Hz*, *−3 dB*, *Off*), Insert Shape (sine, triangle, saw, inverse saw, square, ramps, ADSR; over the selection or the grid cell), Simplify Envelope, Cut / Copy / Paste / Duplicate / Delete |
-| Cmd 1 / Cmd 2 | narrower / wider grid: 1/4 to 1/64 of the path (1/16 is a bar of a 16-bar build) |
-| Cmd 3 / Cmd 4 | triplet grid / snap on or off |
+| Click the line | adds a breakpoint there (and drags it) |
+| Double-click off the line | adds a breakpoint where you clicked |
+| Click a breakpoint | deletes it (a lane keeps its last one) |
+| Drag a breakpoint | moves it, the selected ones with it, with a guide down the lane to show where it sits on the grid; it snaps to the grid and to its neighbours' times (Cmd, Alt on Windows: no snap; Shift: one axis, finer). Drag it over a neighbour to remove that one |
+| Click near a segment, or Shift-click on it, and drag | moves the segment (it shows heavier, with its nearer breakpoint's value); inside a time selection the selected part moves as one |
+| Option-drag a segment | curves it (the curve follows the mouse); Option-double-click straightens it |
+| Drag the background | a time selection, across lanes too; Shift-click extends it. Its handles stretch it (top and bottom, left and right; Shift on the sides moves the rest along) and skew it (corners); Shift finer, Option mirrors the other side |
+| Right-click | Edit Value (the selected breakpoints move by as much) / Add Value (type it in the knob's words: *400 Hz*, *−3 dB*, *Off*), Insert Shape (sine, triangle, saw, inverse saw, square, ramps, ADSR; over the selection or the grid cell), Simplify Envelope, the edit commands, the grid, Remove Lane |
+| Click the background | puts the insert marker there, for the keys |
+| ← → | the insert marker (or the selection) a grid step; Shift resizes the selection |
+| Option ← → | jumps to the previous / next breakpoint |
+| ↑ ↓ (or Option ↑ ↓) | the lane above / below |
+| Enter | selects the breakpoint at the marker, or adds one there; Option-click and Tab / Shift-Tab select one too. Then ← → move it, ↑ ↓ (Shift finer) or typing a number change its value, Enter keeps it, Esc takes it back, Delete removes it |
+| Pinch, or Cmd and the wheel | zoom in and out around the mouse |
+| Two-finger swipe, or Shift and the wheel | scroll along the build while zoomed in (up and down scroll the lanes when they don't all fit) |
+| Z / X | zoom to the time selection / back |
+| + / − / W | zoom in / out / show the whole build |
+| The overview (the strip over the ruler) | the whole build, what you see outlined: drag sideways to scroll, down or up to zoom; click beside the outline to jump there, double-click for all of it |
+| Cmd 1 / Cmd 2 | narrower / wider grid: 1/4 to 1/256 of the path (1/16 is a bar of a 16-bar build) |
+| Cmd 3 / Cmd 4 / Cmd 5 | triplet grid / snap on or off / zoom-adaptive grid on or off (**ADAPTIVE**, on by default as in Live: the grid gets finer as you zoom in; Cmd 1 / Cmd 2 then make it denser or wider) |
 | Cmd Z / Cmd Shift Z | undo / redo; undoing the first change of a copy takes PRESET back to the factory preset |
 | Cmd C, X, V, D, A; Delete; Esc | copy, cut, paste, duplicate, select all; delete the selection; deselect |
+| Cmd Delete | removes the lane the keys are on (Live's Delete Automation): the control goes back to your knob |
 | Cmd S / Cmd Shift S | save / save as |
 | The ruler | drag to scrub BUILD, double-click to drop it to 0 |
+
+Not there (yet): Live's …Time commands (Cut Time, Insert Silence and so on),
+which would shift the path against the fixed 0..75 % of BUILD.
 
 The window floats over the DAW while the DAW is in front, and keeps its place
 while the plugin stays open. Your DAW's space bar may not reach the DAW while the
@@ -319,11 +344,13 @@ renders the editor to PNGs (rest, build, peak, cuts, types, and the presets
 rise, squeeze, vacuum, sunrise, pumping, tail and downlift, plus intensity and
 scream with lanes turned down, and switched: Off and back, then the next preset,
 printing the intensities after each step) and the preset editor (edit,
-edit-fork, edit-draw, edit-select, edit-bend, edit-new, edit-small) with the
+edit-fork, edit-draw, edit-select, edit-bend, edit-new, edit-small, edit-keys,
+edit-many, edit-kb, edit-zoom) with the
 built-in loop playing through it, no DAW needed. `... <dir> bench` and
 `edit-bench` time the paints instead; `... <dir> selftest` runs the user
 presets end to end (copy, undo, the project state and what it plays, the
-library in a temporary folder) and exits non-zero if a check fails.
+library in a temporary folder, the lane keys) and exits non-zero if a check
+fails.
 
 ### Trying it without a DAW
 

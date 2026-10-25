@@ -124,6 +124,12 @@ juce::Rectangle<float> Dial::discArea() const
     return juce::Rectangle<float> (d, d).withCentre ({ b.getCentreX(), b.getY() + d * 0.5f });
 }
 
+juce::Rectangle<float> Dial::valueArea() const
+{
+    // 4 px gap, the 13 px name line, then the 16 px value line.
+    return getLocalBounds().toFloat().withTop (discArea().getBottom() + 17.f).withHeight (16.f);
+}
+
 void Dial::resized()
 {
     if (entry != nullptr)
@@ -197,7 +203,7 @@ void Dial::paint (juce::Graphics& g)
         // A build knob at rest isn't doing anything: its value steps back.
         g.setColour (disabled() || off || (rest && ring == Ring::build) ? col::inkFaint : col::ink);
         g.setFont (mono (11.f));
-        g.drawText (off ? juce::String ("OFF") : autoValue ? "AUTO " + valueText() : valueText(), txt.removeFromTop (16.f),
+        g.drawText (off ? juce::String ("OFF") : autoValue ? "AUTO " + valueText() : valueText(), valueArea(),
                     juce::Justification::centredTop, false);
     }
 }
@@ -210,12 +216,14 @@ void Dial::nudge (float delta, bool asGesture)
     else attachment.setValueAsCompleteGesture (plain);
 }
 
+void Dial::reset() { attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue())); }
+
 void Dial::mouseDown (const juce::MouseEvent& e)
 {
     if (untouchable()) return;
     if (e.mods.isAltDown() || e.mods.isCommandDown())
     {
-        attachment.setValueAsCompleteGesture (param.convertFrom0to1 (param.getDefaultValue()));
+        reset();
         return;
     }
     dragging = true;
@@ -263,9 +271,28 @@ void Dial::mouseExit (const juce::MouseEvent&)
     if (onHover) onHover (this, false);
 }
 
-void Dial::mouseDoubleClick (const juce::MouseEvent&)
+void Dial::mouseDoubleClick (const juce::MouseEvent& e)
 {
     if (untouchable()) return;
+    // The second click opened a drag gesture: close it before writing the value.
+    if (dragging)
+    {
+        dragging = false;
+        attachment.endGesture();
+    }
+
+    // Only the number types a value; anywhere else on the dial resets it.
+    const float w = std::max (24.f, textWidth (mono (11.f), valueText()) + 8.f);
+    if (valueArea().withSizeKeepingCentre (w, valueArea().getHeight()).contains (e.position))
+        openEntry();
+    else
+        reset();
+}
+
+void Dial::openEntry()
+{
+    // Already typing: replacing the editor would close the new one as the old one loses focus.
+    if (entry != nullptr) return;
     entry = std::make_unique<juce::TextEditor>();
     entry->setFont (mono (11.f));
     entry->setJustification (juce::Justification::centred);
@@ -752,8 +779,10 @@ int TextKey::idealWidth() const { return (int) std::ceil (textWidth (label (9.f)
 void TextKey::paint (juce::Graphics& g)
 {
     g.fillAll (col::sheet);
-    const bool over = usable && isMouseOver();
-    const auto r = getLocalBounds().toFloat().reduced (0.5f).translated (0.f, down && over ? 1.f : 0.f);
+    const bool over = usable && hover, pressed = down && over;
+    // Pressed, its top edge comes down a pixel and the word with it; the bottom
+    // edge stays (moved down too, it would leave the key's bounds and vanish).
+    const auto box = getLocalBounds().toFloat().reduced (0.5f), r = box.withTrimmedTop (pressed ? 1.f : 0.f);
     if (on && usable)
     {
         g.setColour (col::ink);
@@ -764,7 +793,8 @@ void TextKey::paint (juce::Graphics& g)
         g.setColour (! usable ? col::hairline : over ? col::ink : col::inkSoft);
         g.drawRoundedRectangle (r, kRadius, 1.f);
     }
-    caption (g, text, r, juce::Justification::centred, on && usable ? col::sheet : usable ? col::ink : col::inkFaint, 9.f);
+    caption (g, text, box.translated (0.f, pressed ? 1.f : 0.f), juce::Justification::centred,
+             on && usable ? col::sheet : usable ? col::ink : col::inkFaint, 9.f);
 }
 
 void TextKey::mouseDown (const juce::MouseEvent&)
@@ -774,9 +804,14 @@ void TextKey::mouseDown (const juce::MouseEvent&)
     repaint();
 }
 
-void TextKey::mouseDrag (const juce::MouseEvent&)
+void TextKey::mouseDrag (const juce::MouseEvent& e)
 {
-    if (down) repaint();   // it lifts while the mouse is off it
+    // It lifts while the mouse is off it.
+    if (const bool in = getLocalBounds().contains (e.getPosition()); in != hover)
+    {
+        hover = in;
+        repaint();
+    }
 }
 
 void TextKey::mouseUp (const juce::MouseEvent& e)
@@ -789,12 +824,14 @@ void TextKey::mouseUp (const juce::MouseEvent& e)
 
 void TextKey::mouseEnter (const juce::MouseEvent&)
 {
+    hover = true;
     repaint();
     if (onHover) onHover (this, true);
 }
 
 void TextKey::mouseExit (const juce::MouseEvent&)
 {
+    hover = false;
     repaint();
     if (onHover) onHover (this, false);
 }

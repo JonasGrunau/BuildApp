@@ -32,8 +32,8 @@ public:
 //   position   one bone tick where the value is (noise pitch: a place, not an amount)
 //   bipolar    bone from the default to the value (level around 0 dB)
 //   plain      grey from the left to the value (dry/wet)
-// Drag up/down (Shift = fine), wheel, double-click to type a value,
-// Alt/Cmd-click to reset.
+// Drag up/down (Shift = fine), wheel, double-click or Alt/Cmd-click to
+// reset; only a double-click on the number types a value.
 //
 // A knob something else drives (auto resonance) is disabled: dimmed, it
 // shows that value, marked AUTO, and ignores the mouse until it is handed
@@ -67,7 +67,10 @@ public:
 
 private:
     juce::Rectangle<float> discArea() const;
+    juce::Rectangle<float> valueArea() const;   // the value line under the name
     void nudge (float deltaNorm, bool asGesture);
+    void reset();
+    void openEntry();
     juce::String valueText() const { return param.getText (param.convertTo0to1 (shown()), 0); }
     float shown() const { return lockedValue ? *lockedValue : autoValue.value_or (value); }
     bool disabled() const { return autoValue.has_value(); }
@@ -252,7 +255,7 @@ public:
 
 private:
     juce::String text, help;
-    bool on = false, usable = true, down = false;
+    bool on = false, usable = true, down = false, hover = false;
 };
 
 // Horizontal level meter, -60..0 dBFS, with a peak tick.
